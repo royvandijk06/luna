@@ -1,0 +1,26 @@
+{
+  "name": "src-lib-scanner",
+  "version": "1.0.0",
+  "description": "Scan source code to analyze library usage",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "analysis",
+    "libraries",
+    "packages",
+    "modules",
+    "scanning"
+  ],
+  "author": "R.E.L. van Dijk",
+  "license": "ISC",
+  "dependencies": {
+    "esprima": "latest",
+    "glob": "latest"
+  },
+  "devDependencies": {
+    "@babel/eslint-parser": "latest"
+  }
+}
