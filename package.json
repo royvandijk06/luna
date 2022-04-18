@@ -1,6 +1,6 @@
 {
   "name": "src-lib-scanner",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Scan source code to analyze library usage",
   "main": "index.js",
   "scripts": {
@@ -17,10 +17,11 @@
   "author": "R.E.L. van Dijk",
   "license": "ISC",
   "dependencies": {
-    "esprima": "latest",
-    "glob": "latest"
+    "glob": "^8.0.1",
+    "estraverse": "^5.3.0",
+    "espree": "^9.3.1"
   },
   "devDependencies": {
-    "@babel/eslint-parser": "latest"
+    "@babel/eslint-parser": "^7.17.0"
   }
 }
