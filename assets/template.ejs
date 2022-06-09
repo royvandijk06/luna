@@ -15,7 +15,7 @@
 
     <body>
         <header>
-            <h1>LUNA: <%= title %>
+            <h1>[LUNA] <%= title %>
             </h1>
             <div id="settings">
                 <h3>Settings</h3>
@@ -23,11 +23,16 @@
                 <label for="bShowData">Show data (JSON) imports</label>
                 <br><br>
                 <button id="fitBtn">Fit</button>
-                <button id="resetBtn">Reset</button>
+                <button id="resetBtn">Center</button>
                 <button id="imgBtn">&#x25EA;</button>
+                <button id="backBtn" style="display: none;">Back</button>
             </div>
+            <div id="info">
+                <h3>Info</h3>
+                <div id="info-content"></div>
         </header>
         <main>
+            <img id="loader" src="<%= paths.loader %>"></img>
             <div id="cy" data-cy="<%= JSON.stringify(data) %>"></div>
             <script>window.data = JSON.parse(document.querySelector("#cy").dataset.cy);</script>
             <script src="<%= paths.cySetup %>"></script>

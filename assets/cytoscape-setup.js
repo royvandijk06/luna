@@ -7,6 +7,7 @@ function pageReady() {
         "fitBtn":    document.querySelector("#fitBtn"), // reset cytoscape
         "resetBtn":  document.querySelector("#resetBtn"), // fit cytoscape
         "imgBtn":    document.querySelector("#imgBtn"), // save img cytoscape
+        // "backBtn":   document.querySelector("#backBtn"), // back cytoscape
     };
     let cyDataNodes = null;
     let cyDataEdges = null;
@@ -45,50 +46,60 @@ function pageReady() {
         // "animationDuration":           500, // duration of animation in ms if enabled
     };
 
+    const style = [
+        {
+            "selector": "node",
+            "style":    {
+                "background-color":        "data(color)",
+                "label":                   "data(label)",
+                "color":                   "data(color)",
+                "text-valign":             "center",
+                "text-halign":             "center",
+                "background-opacity":      1,
+                "text-background-opacity": 0.5,
+                "text-background-color":   "#000",
+                "text-background-padding": 3,
+                "text-wrap":               "wrap",
+                "text-max-width":          10,
+            },
+        },
+        {
+            "selector": ":parent",
+            "css":      {
+                "background-color":   "data(color)",
+                "background-opacity": 0.1,
+                "text-valign":        "top",
+                "text-halign":        "center",
+                "text-transform":     "uppercase",
+                "shape":              "star",
+
+            },
+        },
+        {
+            "selector": "edge",
+            "style":    {
+                "width":              3,
+                "line-color":         "data(color)",
+                "target-arrow-color": "data(color)",
+                "target-arrow-shape": "triangle",
+                "arrow-scale":        2,
+                "curve-style":        "bezier",
+            },
+        },
+    ];
+
     const makeCy = () => {
         window.cy = cytoscape({
-            "container": document.getElementById("cy"),
-            "elements":  window.data.main,
-
-            "style": [
-                {
-                    "selector": "node",
-                    "style":    {
-                        "background-color": "data(color)",
-                        "label":            "data(label)",
-                        "color":            "data(color)",
-                    },
-                },
-                {
-                    "selector": ":parent",
-                    "css":      {
-                        "background-color":   "data(color)",
-                        "background-opacity": 0.1,
-                        "text-valign":        "top",
-                        "text-halign":        "center",
-                        "shape":              "star",
-                    },
-                },
-                {
-                    "selector": "edge",
-                    "style":    {
-                        "width":              3,
-                        "line-color":         "data(color)",
-                        "target-arrow-color": "data(color)",
-                        "target-arrow-shape": "triangle",
-                        "arrow-scale":        2,
-                        "curve-style":        "bezier",
-                    },
-                },
-            ],
-
+            "container":        document.getElementById("cy"),
+            "elements":         window.data.main,
+            style,
             layout,
-
             "wheelSensitivity": 0.1,
             "headless":         false,
         });
 
         window.cy.ready(() => {
+            document.querySelector("#loader").style.display = "none";
             cyDataNodes = window.cy.$("node[id $= '.json']");
             cyDataEdges = cyDataNodes.connectedEdges();
 
@@ -134,44 +145,26 @@ function pageReady() {
             }
 
             window.cy = cytoscape({
-                "container": document.getElementById("cy"),
-                "elements":  window.data.files[id],
-
-                "style": [
-                    {
-                        "selector": "node",
-                        "style":    {
-                            "background-color": "data(color)",
-                            "label":            "data(label)",
-                        },
-                    },
-                    {
-                        "selector": ":parent",
-                        "css":      {
-                            "background-color":   "data(color)",
-                            "background-opacity": 0.5,
-                            "text-valign":        "top",
-                            "text-halign":        "center",
-                        },
-                    },
-                    {
-                        "selector": "edge",
-                        "style":    {
-                            "width":              3,
-                            "line-color":         "data(color)",
-                            "target-arrow-color": "data(color)",
-                            "target-arrow-shape": "triangle",
-                            "arrow-scale":        2,
-                            "curve-style":        "bezier",
-                        },
-                    },
-                ],
-
+                "container":        document.getElementById("cy"),
+                "elements":         window.data.files[id],
+                style,
                 layout,
-
                 "wheelSensitivity": 0.1,
                 "headless":         false,
             });
+        });
+
+        window.cy.on("mouseover", "node[^group]", (evt) => {
+            let node = evt.target;
+            window.cy.$("node[^group], edge").style({ "opacity": 0.1 });
+            node.style({ "opacity": 1 });
+            node.predecessors().style({ "opacity": 1 });
+            node.successors().style({ "opacity": 1 });
+            document.querySelector("#info-content").innerHTML = `<pre>${JSON.stringify(node.data(), null, 2)}</pre>`;
+        });
+
+        window.cy.on("mouseout", "node", () => {
+            window.cy.$("node[^group], edge").style({ "opacity": 1 });
         });
     };
     makeCy();

@@ -1,11 +1,12 @@
 const srcPath = __dirname; // this project (small)
 
-const { Syntax, VisitorOption, traverse } = require("estraverse");
-const { parse, latestEcmaVersion } = require("espree");
+const astWalk = require("acorn-walk").fullAncestor;
+const AST = require("acorn-loose");
 const fetch = require("node-fetch");
 const glob = require("glob");
 const ejs = require("ejs");
 const randomColor = require("randomcolor");
+const scan = require("scope-analyzer");
 const { exec } = require("child_process");
 
 const { promisify } = require("util");
@@ -14,43 +15,53 @@ const { basename, resolve, relative, dirname, extname } = require("path");
 
 const depsCache = {};
 
-// TODO: Fix false positives (check scopes) + false negatives (better detection)
+function findReferences(node) {
+    // console.log({ node });
+    let binding = scan.getBinding(node);
+    if (!binding) {
+        // console.log("NO BINDING", { node });
+        return [];
+    }
+    let notItself = (ref) => !["type", "start", "end"].every((k) => ref[k] === node[k]);
+    return binding.getReferences().filter(notItself);
+}
+
 /* Possibilities:
  * 1. Library is loaded into a single variable => variable = library name
  * 2. Library is loaded destructively into multiple objects => require(...) = library name
  * 3. After library is loaded, it gets instantiated
  */
-function findReferences(ast, name) {
-    const refs = [];
-    const visitor = {
-        enter(node) {
-            if (node.type === Syntax.ImportDeclaration) {
-                if (node.source.value === name) {
-                    refs.push(node);
-                }
-            } else if (node.type === Syntax.VariableDeclarator) {
-                if (node.id.type === "Identifier") {
-                    if (node.id.name === name) {
-                        refs.push(node);
-                    }
-                }
-            } else if (node.type === Syntax.MemberExpression) {
-                if (node.object.type === "Identifier") {
-                    if (node.object.name === name) {
-                        refs.push(node);
-                    }
-                }
-            } else if (node.type === Syntax.CallExpression) {
-                if (node.callee.type === "Identifier") {
-                    if (node.callee.name === name) {
-                        refs.push(node);
-                    }
-                }
-            }
-        },
+function findAPI(ast, parent, _api = {}) {
+    let api = _api;
+    let addToAPI = (name, node) => {
+        api[name] = api[name] || {};
+        api[name].name = name;
+        api[name].nodes = (api[name].nodes || []).concat([node]);
+        for (let ref of findReferences(node)) {
+            api[name].children = findAPI(ast, ref.parent, api[name].children);
+        }
     };
-    traverse(ast, visitor, { "ecmaVersion": latestEcmaVersion, "loc": true });
-    return refs;
+
+    if (parent.property) { // property of object
+        addToAPI(parent.property.name, parent.property);
+    } else if (parent.id && parent.id.properties) { // destructuring
+        let props = parent.id.properties;
+        for (const prop of props) {
+            addToAPI(prop.value?.name || prop.key.name, prop.value || prop.key); // choose value over key if it exists
+            if (prop.value && prop.value.properties) {
+                // TODO: support nested destructuring
+            }
+        }
+    } else if (parent.id) { // variable name
+        for (let ref of findReferences(parent.id)) {
+            api = findAPI(ast, ref.parent, api);
+        }
+    } else if (parent.type === "NewExpression") { // new instance of library
+        addToAPI("{{instance}}", parent.parent.id);
+    } else {
+        console.log("CANNOT FIND API", { parent });
+    }
+    return api;
 }
 
 async function getDependencies(name, version) {
@@ -136,24 +147,24 @@ function constructString(node) {
     let str = "";
 
     switch (node.type) {
-        case Syntax.Literal:
+        case "Literal":
             str = node.value;
             break;
-        case Syntax.TemplateLiteral:
+        case "TemplateLiteral":
             // str = node.quasis.filter((q) => q.value.raw !== "")[0].value.raw; // wrong
             str = constructTemplateLiteral(node);
             break;
-        case Syntax.Identifier:
+        case "Identifier":
             if (node.name === "__dirname") {
                 str = srcPath;
             } else {
                 str = `#${node.name}#`; // variable or function
             }
             break;
-        case Syntax.BinaryExpression:
+        case "BinaryExpression":
             str = `${constructString(node.left)}${constructString(node.right)}`;
             break;
-        case Syntax.TemplateElement:
+        case "TemplateElement":
             str = node.value.raw;
             break;
         default:
@@ -172,6 +183,7 @@ async function renderOutput(outputPath, data) {
         "cySetup":    resolve(__dirname, "assets", "cytoscape-setup.js"),
         "css":        resolve(__dirname, "assets", "stylesheet.css"),
         "template":   resolve(__dirname, "assets", "template.ejs"),
+        "loader":     resolve(__dirname, "assets", "loader.svg"),
         "output":     resolve(outputPath),
     };
     let title = `${data.name || paths.output}${data.version ? `@${data.version}` : ""}`;
@@ -182,66 +194,48 @@ async function renderOutput(outputPath, data) {
 (async() => {
     let getFiles = promisify(glob);
     // all javascript files in the project (excluding node_modules)
-    let pattern = resolve(`${srcPath}/{,!(node_modules)/**/}*.{js,mjs}`);
+    let pattern = resolve(`${srcPath}/{,!(node_modules)/**/}*.{js,mjs}`).replace(/\\/g, "/");
     let srcFiles = (await getFiles(pattern)).map((f) => resolve(f));
     let { name, version, devDependencies, dependencies } = JSON.parse(await readFile(resolve(srcPath, "./package.json"), "utf8"));
     let hasNodeModules = await stat(resolve(srcPath, "./node_modules")).then(() => true)
         .catch(() => false);
     let node_modules = await getNodeModules(hasNodeModules, dependencies, devDependencies);
-    // console.log(JSON.stringify(node_modules, null, 2));
-
     let externalLibs = Object.keys(dependencies).concat(Object.keys(devDependencies));
     let libs = {};
 
     for (const file of srcFiles) {
         try {
             const code = await readFile(file);
-            const ast = parse(code, { "ecmaVersion": latestEcmaVersion, "sourceType": "module" });
+            const ast = AST.parse(code, { "ecmaVersion": "latest", "sourceType": "module" });
+
+            scan.createScope(ast, ["module", "require", "exports", "__dirname", "__filename"]);
+            scan.crawl(ast);
 
             let libsInFile = {};
             let saveLib = async(libName, parent) => {
-                if (!libsInFile[libName]) {
-                    libsInFile[libName] = {}; // API of lib
-                }
-                if (parent.property) { // property of object
-                    libsInFile[libName][parent.property.name] = findReferences(ast, parent.property.name);
-                } else if (parent.id && parent.id.properties) { // destructuring
-                    for (const prop of parent.id.properties) {
-                        libsInFile[libName][prop.value.name] = findReferences(ast, prop.value.name);
-                    }
-                } else if (parent.id && parent.id.name) { // entire object
-                    // TODO: find properties instead of saving variable name
-                    // let props = findProperties(ast, parent.id.name);
-                    libsInFile[libName][parent.id.name] = findReferences(ast, parent.id.name);
-                } else {
-                    console.log({ parent });
-                }
+                libsInFile[libName] = libName.toLocaleLowerCase().endsWith(".json") ? {} : findAPI(ast, parent); // API of lib (don't find API of json files)
             };
-            traverse(ast, {
-                "enter": (node, parent) => {
-                    if (node.type === Syntax.ImportDeclaration) {
-                        let libName = node.source.value;
+            astWalk(ast, (node, parents) => {
+                let parent = parents[parents.length - 2];
+                if (node.type === "ImportDeclaration") {
+                    let libName = node.source.value;
+                    if (!libName) {
+                        console.error("Unable to determine library name 1 (skipping)", node, JSON.stringify(node, null, 2));
+                        return;
+                    }
+                    saveLib(libName, parent);
+                } else if (node.type === "CallExpression") {
+                    if (node.callee.name === "require") {
+                        // 'require' only takes 1 argument: https://nodejs.org/api/modules.html#requireid
+                        let argNode = node.arguments[0];
+                        let libName = constructString(argNode);
                         if (!libName) {
-                            console.error("Unable to determine library name 1 (skipping)", node, JSON.stringify(node, null, 2));
-                            return VisitorOption.Continue;
+                            console.error("Unable to determine library name 2 (skipping)", node, JSON.stringify(node, null, 2));
+                            return;
                         }
                         saveLib(libName, parent);
-                        return VisitorOption.Skip;
-                    } else if (node.type === Syntax.CallExpression) {
-                        if (node.callee.name === "require") {
-                            // require only takes 1 argument: https://nodejs.org/api/modules.html#requireid
-                            let argNode = node.arguments[0];
-                            let libName = constructString(argNode);
-                            if (!libName) {
-                                console.error("Unable to determine library name 2 (skipping)", node, JSON.stringify(node, null, 2));
-                                return VisitorOption.Continue;
-                            }
-                            saveLib(libName, parent);
-                            return VisitorOption.Skip;
-                        }
                     }
-                    return VisitorOption.Continue;
-                },
+                }
             });
             libs[file] = libsInFile;
         } catch (e) {
@@ -252,12 +246,12 @@ async function renderOutput(outputPath, data) {
 
     // GROUPS
     let treeData = [
-        { "data": { "label": "Files", "color": "#fff", "id": "files" } },
-        { "data": { "label": "Libraries", "color": "#fff", "id": "libs" } },
-        { "data": { "label": "Unused", "color": "#fff", "parent": "libs", "id": "unused" } },
-        { "data": { "label": "Internal", "color": "#fff", "parent": "libs", "id": "internal" } },
-        { "data": { "label": "External", "color": "#fff", "parent": "libs", "id": "external" } },
-        { "data": { "label": "Dependency Tree", "color": "#fff", "id": "deps" } },
+        { "data": { "label": "Files", "color": "#fff", "id": "files", "group": true } },
+        { "data": { "label": "Libraries", "color": "#fff", "id": "libs", "group": true } },
+        { "data": { "label": "Unused", "color": "#fff", "parent": "libs", "id": "unused", "group": true } },
+        { "data": { "label": "Internal", "color": "#fff", "parent": "libs", "id": "internal", "group": true } },
+        { "data": { "label": "External", "color": "#fff", "parent": "libs", "id": "external", "group": true } },
+        { "data": { "label": "Dependency Tree", "color": "#fff", "id": "deps", "group": true } },
     ];
     let filesTreeData = {};
 
@@ -290,6 +284,7 @@ async function renderOutput(outputPath, data) {
             treeData.push({
                 "data": {
                     "label":  `/${parentFolder}`,
+                    "group":  true,
                     "color":  "#fff",
                     "parent": isParentRoot ? "files" : parentParentFolder,
                     "id":     parentFolder,
@@ -324,7 +319,6 @@ async function renderOutput(outputPath, data) {
                 let altInternalPath = ext ? internalPath.replace(ext, "") : `${internalPath}.js`; // sometimes the extension is missing, TODO: support folder/index.js
                 let srcFile = srcFiles.find((f) => f === internalPath || f === altInternalPath);
                 isInternalDep = Boolean(srcFile);
-                // console.log({ file, srcPath, lib, internalPath, altInternalPath, srcFile, ext, isInternalDep, srcFiles });
                 if (isInternalDep) {
                     let fileId = relative(srcPath, srcFile);
                     id = fileId;
@@ -339,7 +333,7 @@ async function renderOutput(outputPath, data) {
                 treeData.push({
                     "data": {
                         id,
-                        "isData":  libName.toLocaleLowerCase().endsWith(".json"),
+                        "isData":  libName.toLocaleLowerCase().endsWith(".json"), // weak detection
                         "library": { "name": libName, version },
                         "color":   colors[id],
                         "parent":  externalLibs.includes(libName) ? "external" : "internal", // group: external or internal
@@ -358,39 +352,41 @@ async function renderOutput(outputPath, data) {
                 },
             });
 
-            // node
-            filesTreeData[fileId].push({
-                "data": {
-                    id,
-                    "library": libName,
-                    "color":   "#999",
-                    "parent":  externalLibs.includes(libName) ? "external" : "internal", // group: external or internal
-                    "label":   id,
-                },
-            });
-
-            for (let varname in libs[file][libName]) {
-                // for (let node of libs[file][lib][varname]) {
-                let apiCall = varname;
-                // node
-                filesTreeData[fileId].push({
-                    "data": {
-                        "id":    varname,
-                        "color": "#999",
-                        "label": varname,
-                    },
-                });
-                // edge
-                filesTreeData[fileId].push({
-                    "data": {
-                        "id":     `${id} -> ${varname}`,
-                        "color":  "#999",
-                        "source": id,
-                        "target": varname,
-                    },
-                });
-                // }
-            }
+            let recurseApi = (api, source, parent) => {
+                for (let name in api) {
+                    if (!name || !source || name === "undefined" || source === "undefined") { console.log(api.undefined); }
+                    // node
+                    filesTreeData[fileId].push({
+                        "data": {
+                            // parent,
+                            "id":    `${parent} | ${source}`,
+                            "color": "#999",
+                            "label": source,
+                        },
+                    });
+                    // node
+                    filesTreeData[fileId].push({
+                        "data": {
+                            // parent,
+                            "id":    `${parent} | ${name}`,
+                            "color": "#999",
+                            "label": name,
+                        },
+                    });
+                    // edge
+                    filesTreeData[fileId].push({
+                        "data": {
+                            // parent,
+                            "id":     `${parent} | ${source} -> ${name}`,
+                            "color":  "#999",
+                            "source": `${parent} | ${source}`,
+                            "target": `${parent} | ${name}`,
+                        },
+                    });
+                    recurseApi(api[name].children, name, parent);
+                }
+            };
+            recurseApi(libs[file][libName], libName, libName);
         }
     }
 
