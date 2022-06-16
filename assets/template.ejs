@@ -18,18 +18,25 @@
             <h1>[LUNA] <%= title %>
             </h1>
             <div id="settings">
-                <h3>Settings</h3>
+                <h3>Graph</h3>
                 <input type="checkbox" id="bShowData" name="bShowData" checked></input>
                 <label for="bShowData">Show data (JSON) imports</label>
                 <br><br>
-                <button id="fitBtn">Fit</button>
-                <button id="resetBtn">Center</button>
-                <button id="imgBtn">&#x25EA;</button>
-                <button id="backBtn" style="display: none;">Back</button>
+                <center>
+                    <button id="imgBtn">&#x25EA;</button>
+                    <button id="fitBtn">Fit</button>
+                    <button id="resetBtn">Center</button>
+                    <button id="backBtn" style="display: none;">Back</button>
+                </center>
             </div>
-            <div id="info">
-                <h3>Info</h3>
+            <div id="info" style="display: none;">
+                <h3>Node</h3>
                 <div id="info-content"></div>
+                <center>
+                    <button id="lockBtn">&#128275;&#xFE0E;</button>
+                    <button id="centerBtn">Center</button>
+                    <button id="highlightBtn">Highlight</button>
+                </center>
         </header>
         <main>
             <img id="loader" src="<%= paths.loader %>"></img>

@@ -1,21 +1,31 @@
-const srcPath = __dirname; // this project (small)
+// const srcPath = __dirname; // this project (small)
+// const srcPath = "C:\\Users\\Roy\\OneDrive\\Projects\\NodeJS\\epicgames-freebies-claimer"; // similar coding style (mid)
+// const srcPath = "C:\\Users\\Roy\\OneDrive\\Projects\\NodeJS\\node-steam-user"; // different coding style (big)
+// const srcPath = "E:\\Downloads\\AugmentedSteam"; // different coding style (big)
+// const srcPath = "C:\\Users\\Roy\\AppData\\Roaming\\npm\\node_modules\\scope-analyzer"; // different coding style (dependency)
 
-const astWalk = require("acorn-walk").fullAncestor;
-const AST = require("acorn-loose");
-const fetch = require("node-fetch");
-const glob = require("glob");
-const ejs = require("ejs");
-const randomColor = require("randomcolor");
-const scan = require("scope-analyzer");
+const srcPath = process.argv[2] || process.cwd() || __dirname;
+console.log({ srcPath });
+
+const { basename, resolve, relative, dirname, extname } = require("path");
 const { exec } = require("child_process");
-
 const { promisify } = require("util");
 const { readFile, writeFile, stat } = require("fs/promises");
-const { basename, resolve, relative, dirname, extname } = require("path");
+const AST = require("acorn-loose");
+const astWalk = require("acorn-walk").fullAncestor;
+const ejs = require("ejs");
+const fetch = require("node-fetch");
+const glob = require("glob");
+const randomColor = require("randomcolor");
+const scan = require("scope-analyzer");
 
 const depsCache = {};
 
 function findReferences(node) {
+    if (!node) {
+        console.log(new Error("No node"));
+        return [];
+    }
     // console.log({ node });
     let binding = scan.getBinding(node);
     if (!binding) {
@@ -42,7 +52,7 @@ function findAPI(ast, parent, _api = {}) {
         }
     };
 
-    if (parent.property) { // property of object
+    if (parent.property && parent.computed === false) { // property of object
         addToAPI(parent.property.name, parent.property);
     } else if (parent.id && parent.id.properties) { // destructuring
         let props = parent.id.properties;
@@ -57,9 +67,13 @@ function findAPI(ast, parent, _api = {}) {
             api = findAPI(ast, ref.parent, api);
         }
     } else if (parent.type === "NewExpression") { // new instance of library
-        addToAPI("{{instance}}", parent.parent.id);
+        if (parent.parent.id) { // instance assigned to a variable
+            addToAPI("{{instance}}", parent.parent.id);
+        } else if (parent.parent.left && parent.parent.left.property && !parent.parent.left.computed) { // instance assigned to a property
+            addToAPI("{{instance}}", parent.parent.left.property);
+        }
     } else {
-        console.log("CANNOT FIND API", { parent });
+        // console.log("CANNOT FIND API", { parent });
     }
     return api;
 }
@@ -115,18 +129,20 @@ async function parseDependencies(dependencies, devDependencies = {}) {
 
 async function getNodeModules(useLocalDependencies, dependencies, devDependencies) {
     if (!useLocalDependencies && !dependencies) {
-        throw new Error("No dependencies found");
+        // throw new Error("No dependencies found");
+        return {};
     }
 
     if (useLocalDependencies) {
         let execute = promisify(exec);
 
-        let { stdout, stderr } = await execute("npm ls --all --json", { "cwd": srcPath });
+        let { stdout, stderr } = await execute("npm ls --all --json", { "cwd": srcPath }).catch((stderr) => ({ stderr }));
         if (stderr) {
-            throw new Error(stderr);
+            // throw new Error(stderr);
+            return parseDependencies(dependencies, devDependencies);
         }
 
-        return JSON.parse(stdout);
+        return JSON.parse(stdout).dependencies;
     }
 
     return parseDependencies(dependencies, devDependencies);
@@ -196,11 +212,11 @@ async function renderOutput(outputPath, data) {
     // all javascript files in the project (excluding node_modules)
     let pattern = resolve(`${srcPath}/{,!(node_modules)/**/}*.{js,mjs}`).replace(/\\/g, "/");
     let srcFiles = (await getFiles(pattern)).map((f) => resolve(f));
-    let { name, version, devDependencies, dependencies } = JSON.parse(await readFile(resolve(srcPath, "./package.json"), "utf8"));
+    let { name, version, devDependencies, dependencies, main } = JSON.parse(await readFile(resolve(srcPath, "./package.json"), "utf8"));
     let hasNodeModules = await stat(resolve(srcPath, "./node_modules")).then(() => true)
         .catch(() => false);
     let node_modules = await getNodeModules(hasNodeModules, dependencies, devDependencies);
-    let externalLibs = Object.keys(dependencies).concat(Object.keys(devDependencies));
+    let externalLibs = Object.keys(dependencies || {}).concat(Object.keys(devDependencies || {}));
     let libs = {};
 
     for (const file of srcFiles) {
@@ -213,7 +229,8 @@ async function renderOutput(outputPath, data) {
 
             let libsInFile = {};
             let saveLib = async(libName, parent) => {
-                libsInFile[libName] = libName.toLocaleLowerCase().endsWith(".json") ? {} : findAPI(ast, parent); // API of lib (don't find API of json files)
+                libsInFile[libName] = libName.toString().toLowerCase()
+                    .endsWith(".json") ? {} : findAPI(ast, parent); // API of lib (don't find API of json files)
             };
             astWalk(ast, (node, parents) => {
                 let parent = parents[parents.length - 2];
@@ -233,6 +250,13 @@ async function renderOutput(outputPath, data) {
                             console.error("Unable to determine library name 2 (skipping)", node, JSON.stringify(node, null, 2));
                             return;
                         }
+                        libName = libName.toString();
+                        if (libName.includes(srcPath)) { // fix path notation
+                            libName = resolve(libName);
+                        }
+                        // if (libName.startsWith(".")) { // relative to absolute path
+                        //     libName = resolve(file, libName);
+                        // }
                         saveLib(libName, parent);
                     }
                 }
@@ -265,7 +289,7 @@ async function renderOutput(outputPath, data) {
     let nLibs = libSet.length; // number of libraries?
     let randomColors = randomColor({
         "count":      nLibs,
-        "luminosity": "bright",
+        "luminosity": "light",
     });
     let colors = {};
 
@@ -276,10 +300,16 @@ async function renderOutput(outputPath, data) {
         let fileName = basename(file);
         let fileExt = extname(file);
         let parentFolder = basename(dirname(file));
-        let parentParentFolder = basename(dirname(dirname(file)));
-        let isParentRoot = relative(srcPath, dirname(dirname(file))) === "";
+        // let parentParentFolder = basename(dirname(dirname(file)));
+        // let isParentRoot = relative(srcPath, dirname(dirname(file))) === "";
 
-        if (!isRootFile) {
+        let addParentGroup = (dir) => {
+            let parentFolder = basename(dir);
+            if (treeData.find((node) => node.data.id === parentFolder)) {
+                return;
+            }
+            let parentParentFolder = basename(dirname(dir));
+            let isParentRoot = relative(srcPath, dirname(dir)) === "";
             // group
             treeData.push({
                 "data": {
@@ -290,6 +320,13 @@ async function renderOutput(outputPath, data) {
                     "id":     parentFolder,
                 },
             });
+            if (!isParentRoot) {
+                addParentGroup(dirname(dir));
+            }
+        };
+
+        if (!isRootFile) {
+            addParentGroup(dirname(file));
         }
 
         // node
@@ -297,10 +334,11 @@ async function renderOutput(outputPath, data) {
             "data": {
                 "id":     fileId,
                 "isData": fileExt === ".json",
-                "color":  "#999",
+                "color":  "#fff",
                 "path":   file,
                 "parent": isRootFile ? "files" : parentFolder,
                 "label":  fileName,
+                "main":   main ? resolve(file) === resolve(srcPath, main) : false,
             },
         });
 
@@ -346,7 +384,7 @@ async function renderOutput(outputPath, data) {
             treeData.push({
                 "data": {
                     "id":     `${fileId} -> ${id}`,
-                    "color":  "#999",
+                    "color":  "#fff",
                     "source": fileId,
                     "target": id,
                 },
@@ -360,7 +398,7 @@ async function renderOutput(outputPath, data) {
                         "data": {
                             // parent,
                             "id":    `${parent} | ${source}`,
-                            "color": "#999",
+                            "color": "#fff",
                             "label": source,
                         },
                     });
@@ -369,7 +407,7 @@ async function renderOutput(outputPath, data) {
                         "data": {
                             // parent,
                             "id":    `${parent} | ${name}`,
-                            "color": "#999",
+                            "color": "#fff",
                             "label": name,
                         },
                     });
@@ -378,7 +416,7 @@ async function renderOutput(outputPath, data) {
                         "data": {
                             // parent,
                             "id":     `${parent} | ${source} -> ${name}`,
-                            "color":  "#999",
+                            "color":  "#fff",
                             "source": `${parent} | ${source}`,
                             "target": `${parent} | ${name}`,
                         },
@@ -438,6 +476,7 @@ async function renderOutput(outputPath, data) {
         }
     };
     traverseTree(node_modules);
+    // console.log({ node_modules });
 
     renderOutput(srcPath, {
         name,
