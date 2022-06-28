@@ -1,11 +1,7 @@
-// const srcPath = __dirname; // this project (small)
-// const srcPath = "C:\\Users\\Roy\\OneDrive\\Projects\\NodeJS\\epicgames-freebies-claimer"; // similar coding style (mid)
-// const srcPath = "C:\\Users\\Roy\\OneDrive\\Projects\\NodeJS\\node-steam-user"; // different coding style (big)
-// const srcPath = "E:\\Downloads\\AugmentedSteam"; // different coding style (big)
-// const srcPath = "C:\\Users\\Roy\\AppData\\Roaming\\npm\\node_modules\\scope-analyzer"; // different coding style (dependency)
-
+#!/usr/bin/env node
 const srcPath = process.argv[2] || process.cwd() || __dirname;
-console.log({ srcPath });
+const debug = true;
+if (debug) { console.log({ srcPath }); }
 
 const { basename, resolve, relative, dirname, extname } = require("path");
 const { exec } = require("child_process");
@@ -23,7 +19,11 @@ const depsCache = {};
 
 function findReferences(node) {
     if (!node) {
-        console.log(new Error("No node"));
+        if (debug) { console.log(new Error("No node")); }
+        return [];
+    }
+    if (node.type !== "Identifier") {
+        if (debug) { console.log(new Error("Not an identifier"), node); }
         return [];
     }
     // console.log({ node });
@@ -41,14 +41,14 @@ function findReferences(node) {
  * 2. Library is loaded destructively into multiple objects => require(...) = library name
  * 3. After library is loaded, it gets instantiated
  */
-function findAPI(ast, parent, _api = {}) {
+function discoverAPI(ast, parent, _api = {}) {
     let api = _api;
     let addToAPI = (name, node) => {
         api[name] = api[name] || {};
         api[name].name = name;
         api[name].nodes = (api[name].nodes || []).concat([node]);
         for (let ref of findReferences(node)) {
-            api[name].children = findAPI(ast, ref.parent, api[name].children);
+            api[name].children = discoverAPI(ast, ref.parent, api[name].children);
         }
     };
 
@@ -57,14 +57,15 @@ function findAPI(ast, parent, _api = {}) {
     } else if (parent.id && parent.id.properties) { // destructuring
         let props = parent.id.properties;
         for (const prop of props) {
-            addToAPI(prop.value?.name || prop.key.name, prop.value || prop.key); // choose value over key if it exists
+            // addToAPI(prop.value?.name || prop.key.name, prop.value || prop.key); // choose value over key if it exists
+            addToAPI((prop.value && prop.value.name) || prop.key.name, prop.value || prop.key); // choose value over key if it exists
             if (prop.value && prop.value.properties) {
                 // TODO: support nested destructuring
             }
         }
     } else if (parent.id) { // variable name
         for (let ref of findReferences(parent.id)) {
-            api = findAPI(ast, ref.parent, api);
+            api = discoverAPI(ast, ref.parent, api);
         }
     } else if (parent.type === "NewExpression") { // new instance of library
         if (parent.parent.id) { // instance assigned to a variable
@@ -109,7 +110,9 @@ async function getDependencies(name, version) {
 
 async function parseDependencies(dependencies, devDependencies = {}) {
     let node_modules = {};
-    let deps = { ...dependencies, ...devDependencies };
+    // let deps = { ...dependencies, ...devDependencies };
+    // eslint-disable-next-line prefer-object-spread
+    let deps = Object.assign({}, dependencies, devDependencies);
 
     // for (let dep in deps) {
     await Promise.all(Object.keys(deps).map(async(dep) => {
@@ -138,8 +141,8 @@ async function getNodeModules(useLocalDependencies, dependencies, devDependencie
 
         let { stdout, stderr } = await execute("npm ls --all --json", { "cwd": srcPath }).catch((stderr) => ({ stderr }));
         if (stderr) {
-            // throw new Error(stderr);
-            return parseDependencies(dependencies, devDependencies);
+            throw new Error(stderr);
+            // return parseDependencies(dependencies, devDependencies);
         }
 
         return JSON.parse(stdout).dependencies;
@@ -150,7 +153,8 @@ async function getNodeModules(useLocalDependencies, dependencies, devDependencie
 
 function constructTemplateLiteral(node) {
     let str = "";
-    let nodes = [...node.quasis, ...node.expressions].sort((a, b) => a.start - b.start);
+    // let nodes = [...node.quasis, ...node.expressions].sort((a, b) => a.start - b.start);
+    let nodes = [].concat(node.quasis, node.expressions).sort((a, b) => a.start - b.start);
     for (let i = 0; i < nodes.length; i++) {
         let node = nodes[i];
         // eslint-disable-next-line no-use-before-define
@@ -167,7 +171,6 @@ function constructString(node) {
             str = node.value;
             break;
         case "TemplateLiteral":
-            // str = node.quasis.filter((q) => q.value.raw !== "")[0].value.raw; // wrong
             str = constructTemplateLiteral(node);
             break;
         case "Identifier":
@@ -230,7 +233,7 @@ async function renderOutput(outputPath, data) {
             let libsInFile = {};
             let saveLib = async(libName, parent) => {
                 libsInFile[libName] = libName.toString().toLowerCase()
-                    .endsWith(".json") ? {} : findAPI(ast, parent); // API of lib (don't find API of json files)
+                    .endsWith(".json") ? {} : discoverAPI(ast, parent); // API of lib (don't find API of json files)
             };
             astWalk(ast, (node, parents) => {
                 let parent = parents[parents.length - 2];
@@ -264,28 +267,27 @@ async function renderOutput(outputPath, data) {
             libs[file] = libsInFile;
         } catch (e) {
             console.error(`Unable to parse "${file}": ${e}`);
+            console.log(e);
             continue;
         }
     }
 
     // GROUPS
     let treeData = [
-        { "data": { "label": "Files", "color": "#fff", "id": "files", "group": true } },
+        { "data": { "label": "Source Code", "color": "#fff", "id": "files", "group": true } },
         { "data": { "label": "Libraries", "color": "#fff", "id": "libs", "group": true } },
         { "data": { "label": "Unused", "color": "#fff", "parent": "libs", "id": "unused", "group": true } },
         { "data": { "label": "Internal", "color": "#fff", "parent": "libs", "id": "internal", "group": true } },
         { "data": { "label": "External", "color": "#fff", "parent": "libs", "id": "external", "group": true } },
         { "data": { "label": "Dependency Tree", "color": "#fff", "id": "deps", "group": true } },
     ];
-    let filesTreeData = {};
+    // let filesTreeData = {};
 
     // COLORS
-    let libSet = [
-        ...new Set(Object.values(libs).map((lib) => Object.keys(lib))
-            .flat()
-            .concat(Object.keys(node_modules))),
-    ];
-    console.log({ libSet });
+    let libSet = Array.from(new Set(Object.values(libs).map((lib) => Object.keys(lib))
+        .flat()
+        .concat(Object.keys(node_modules))));
+    if (debug) { console.log({ libSet }); }
     let nLibs = libSet.length; // number of libraries?
     let randomColors = randomColor({
         "count":      nLibs,
@@ -300,8 +302,6 @@ async function renderOutput(outputPath, data) {
         let fileName = basename(file);
         let fileExt = extname(file);
         let parentFolder = basename(dirname(file));
-        // let parentParentFolder = basename(dirname(dirname(file)));
-        // let isParentRoot = relative(srcPath, dirname(dirname(file))) === "";
 
         let addParentGroup = (dir) => {
             let parentFolder = basename(dir);
@@ -338,11 +338,11 @@ async function renderOutput(outputPath, data) {
                 "path":   file,
                 "parent": isRootFile ? "files" : parentFolder,
                 "label":  fileName,
-                "main":   main ? resolve(file) === resolve(srcPath, main) : false,
+                "isMain": main ? resolve(file) === resolve(srcPath, main) : false,
             },
         });
 
-        filesTreeData[fileId] = [];
+        // filesTreeData[fileId] = [];
 
         for (let libName in libs[file]) {
             let id = libName;
@@ -376,55 +376,73 @@ async function renderOutput(outputPath, data) {
                         "color":   colors[id],
                         "parent":  externalLibs.includes(libName) ? "external" : "internal", // group: external or internal
                         "label":   id,
+                        "group":   true,
                     },
                 });
             }
 
-            // edge
-            treeData.push({
-                "data": {
-                    "id":     `${fileId} -> ${id}`,
-                    "color":  "#fff",
-                    "source": fileId,
-                    "target": id,
-                },
-            });
-
-            let recurseApi = (api, source, parent) => {
+            let recurseApi = (libName, api, source) => {
                 for (let name in api) {
-                    if (!name || !source || name === "undefined" || source === "undefined") { console.log(api.undefined); }
+                    // if (!name || !source || name === "undefined" || source === "undefined") { console.log(api.undefined); }
+
+                    if (source) {
+                        // node
+                        treeData.push({
+                            "data": {
+                                "parent": libName,
+                                "id":     `${libName} | ${source}`,
+                                "color":  "#fff",
+                                "label":  source,
+                                "type":   "API",
+                            },
+                        });
+                        // edge
+                        treeData.push({
+                            "data": {
+                                "parent": libName,
+                                "id":     `${libName} | ${source} -> ${name}`,
+                                "color":  "#fff",
+                                "source": `${libName} | ${source}`,
+                                "target": `${libName} | ${name}`,
+                            },
+                        });
+                    }
                     // node
-                    filesTreeData[fileId].push({
+                    treeData.push({
                         "data": {
-                            // parent,
-                            "id":    `${parent} | ${source}`,
-                            "color": "#fff",
-                            "label": source,
-                        },
-                    });
-                    // node
-                    filesTreeData[fileId].push({
-                        "data": {
-                            // parent,
-                            "id":    `${parent} | ${name}`,
-                            "color": "#fff",
-                            "label": name,
+                            "parent": libName,
+                            "id":     `${libName} | ${name}`,
+                            "color":  "#fff",
+                            "label":  name,
+                            "type":   "API",
                         },
                     });
                     // edge
-                    filesTreeData[fileId].push({
+                    treeData.push({
                         "data": {
-                            // parent,
-                            "id":     `${parent} | ${source} -> ${name}`,
+                            "id":     `${libName} -> ${name}`,
                             "color":  "#fff",
-                            "source": `${parent} | ${source}`,
-                            "target": `${parent} | ${name}`,
+                            "source": fileId,
+                            "target": `${libName} | ${name}`,
                         },
                     });
-                    recurseApi(api[name].children, name, parent);
+                    recurseApi(libName, api[name].children, name);
                 }
             };
-            recurseApi(libs[file][libName], libName, libName);
+
+            if (Object.keys(libs[file][libName]).length > 0) {
+                recurseApi(id, libs[file][libName]);
+            } else {
+                // edge
+                treeData.push({
+                    "data": {
+                        "id":     `${fileId} -> ${id}`,
+                        "color":  "#fff",
+                        "source": fileId,
+                        "target": id,
+                    },
+                });
+            }
         }
     }
 
@@ -446,6 +464,7 @@ async function renderOutput(outputPath, data) {
                         "color":   colors[id],
                         "parent":  "unused", // group
                         "label":   id,
+                        "group":   true,
                     },
                 });
             }
@@ -482,6 +501,7 @@ async function renderOutput(outputPath, data) {
         name,
         version,
         "main":  treeData,
-        "files": filesTreeData,
+        "files": treeData,
+        // "files": filesTreeData,
     });
 })();

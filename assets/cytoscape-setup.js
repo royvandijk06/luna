@@ -20,6 +20,7 @@ function fade(element) {
     }, 50);
 }
 
+// eslint-disable-next-line no-unused-vars
 function unfade(element) {
     let op = 0.1; // initial opacity
     element.style.display = "block";
@@ -33,25 +34,31 @@ function unfade(element) {
     }, 10);
 }
 
-function setInfoPanel({ id, library, path, isData, label }) {
+function setInfoPanel({ id, type, library, path, isData, label, parent }) {
     let infoPanel = document.querySelector("#info");
     infoPanel.style.display = "block";
     infoPanel.dataset.nodeId = id;
     let infoContent = infoPanel.querySelector("#info-content");
     let html = `<table><tr><td><b>Label:</b></td><td>${label}</td></tr>`;
-    let type = "unknown";
-    if (isData) {
-        type = "data";
-    } else if (library) {
-        type = "library";
-    } else if (path) {
-        type = "source code";
+    if (!type) {
+        type = "unknown";
+        if (isData) {
+            type = "data";
+        } else if (library) {
+            type = "library";
+        } else if (path) {
+            type = "source code";
+        }
     }
     html += `<tr><td><b>Type:</b></td><td>${type}</td></tr>`;
     if (library) {
         html += `<tr><td><b>Library:</b></td><td>${library.name}</td></tr>`;
         if (library.version) {
             html += `<tr><td><b>Version:</b></td><td>${library.version}</td></tr>`;
+        }
+        if (parent === "external" || parent === "deps") {
+            let isValidVersion = /^[a-z0-9.]+$/i.test(library.version); // good version validation?
+            html += `<tr><td><b>NPM:</b></td><td><a href="https://www.npmjs.com/package/${library.name}${isValidVersion ? `/v/${library.version}` : ""}" target="_blank">${library.name} &#128279;&#xFE0E;</a></td></tr>`;
         }
     }
     if (path) {
@@ -125,41 +132,43 @@ function makeCy(style, layout) {
                 isHighlighted = false;
                 document.querySelector("#highlightBtn").click();
             }
+            // document.querySelector("#centerBtn").click();
         });
-        api.collapse(window.cy.elements("#deps"));
+        api.collapse(window.cy.elements("#deps, node[group][library]"));
     });
 
-    window.cy.nodes().on("click", (e) => {
-        let clickedNode = e.target;
-        let id = clickedNode.data("id");
-        let library = clickedNode.data("library");
+    window.cy.nodes().on("click", () => {
+        document.querySelector("#lockBtn").click();
+        // let clickedNode = e.target;
+        // let id = clickedNode.data("id");
+        // let library = clickedNode.data("library");
 
-        if (clickedNode.data("parent") === "external" || clickedNode.data("parent") === "deps") {
-            let isValidVersion = /^[a-z0-9.]+$/i.test(library.version); // good version validation?
-            window.open(`https://www.npmjs.com/package/${library.name}${isValidVersion ? `/v/${library.version}` : ""}`, "_blank");
-            return;
-        }
+        // if (clickedNode.data("parent") === "external" || clickedNode.data("parent") === "deps") {
+        //     let isValidVersion = /^[a-z0-9.]+$/i.test(library.version); // good version validation?
+        //     window.open(`https://www.npmjs.com/package/${library.name}${isValidVersion ? `/v/${library.version}` : ""}`, "_blank");
+        //     return;
+        // }
 
-        if (!window.data.files[id]) {
-            return;
-        }
+        // if (!window.data.files[id]) {
+        //     return;
+        // }
 
-        window.cy = cytoscape({
-            "container":           document.querySelector("#cy"),
-            "elements":            window.data.files[id],
-            style,
-            layout,
-            "wheelSensitivity":    0.1,
-            "headless":            false,
-            "boxSelectionEnabled": false,
-        });
+        // window.cy = cytoscape({
+        //     "container":           document.querySelector("#cy"),
+        //     "elements":            window.data.files[id],
+        //     style,
+        //     layout,
+        //     "wheelSensitivity":    0.1,
+        //     "headless":            false,
+        //     "boxSelectionEnabled": false,
+        // });
 
-        document.querySelector("#info").style.display = "none";
-        document.querySelector("#bShowData").style.display = "none";
-        document.querySelector("[for=bShowData]").style.display = "none";
+        // document.querySelector("#info").style.display = "none";
+        // document.querySelector("#bShowData").style.display = "none";
+        // document.querySelector("[for=bShowData]").style.display = "none";
     });
 
-    window.cy.on("mouseover", "node[^group]", (evt) => {
+    window.cy.on("mouseover", "node[^group], node[library]", (evt) => {
         if (isLocked) {
             return;
         }
@@ -250,7 +259,7 @@ function pageReady() {
             },
         },
         {
-            "selector": ":parent",
+            "selector": ":parent, node[?group][^library]",
             "css":      {
                 "background-color":   "data(color)",
                 "background-opacity": 0.1,
@@ -274,7 +283,7 @@ function pageReady() {
             },
         },
         {
-            "selector": "node[?main]",
+            "selector": "node[?isMain]",
             "style":    {
                 "width":            50,
                 "height":           50,
@@ -284,10 +293,10 @@ function pageReady() {
 
             },
         },
-        {
-            "selector": "node[?group][^collapsed]:childless",
-            "style":    { "display": "none" },
-        },
+        // {
+        //     "selector": "node[?group][^collapsed]:childless",
+        //     "style":    { "display": "none" },
+        // },
     ];
 
     settingsPanel.bShowData.addEventListener("input", () => {
