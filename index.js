@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+
 const srcPath = process.argv[2] || process.cwd() || __dirname;
 const debug = true;
 if (debug) { console.log({ srcPath }); }
@@ -23,7 +24,7 @@ function findReferences(node) {
         return [];
     }
     if (node.type !== "Identifier") {
-        if (debug) { console.log(new Error("Not an identifier"), node); }
+        // if (debug) { console.log(new Error("Not an identifier"), node); }
         return [];
     }
     // console.log({ node });
@@ -69,14 +70,58 @@ function discoverAPI(ast, parent, _api = {}) {
         }
     } else if (parent.type === "NewExpression") { // new instance of library
         if (parent.parent.id) { // instance assigned to a variable
-            addToAPI("{{instance}}", parent.parent.id);
+            addToAPI("(instance)", parent.parent.id);
         } else if (parent.parent.left && parent.parent.left.property && !parent.parent.left.computed) { // instance assigned to a property
-            addToAPI("{{instance}}", parent.parent.left.property);
+            addToAPI("(instance)", parent.parent.left.property);
         }
     } else {
         // console.log("CANNOT FIND API", { parent });
     }
     return api;
+}
+
+// function findCallSource(node) {
+//     let source = null;
+//     let predecessor = node.parent;
+//     while (!source && predecessor) {
+//         if (predecessor.type === "FunctionDeclaration" || predecessor.type === "VariableDeclarator" || predecessor.type === "Program") {
+//             source = predecessor;
+//         }
+//         predecessor = predecessor.parent;
+//     }
+//     return source;
+// }
+
+function findCallSource(node) {
+    let source = null;
+    let predecessor = node.parent;
+    while (!source && predecessor) {
+        if (predecessor.type === "Program") {
+            source = predecessor;
+        } else if (predecessor.type === "BlockStatement") {
+            if (predecessor.parent.parent.type === "VariableDeclarator") { // function assigned to a variable
+                source = predecessor.parent.parent;
+            } else if (predecessor.parent.type === "FunctionDeclaration") { // function with name
+                source = predecessor.parent;
+            } else if (predecessor.parent.type === "FunctionExpression") { // nameless function
+                source = predecessor.parent;
+            }
+        }
+        predecessor = predecessor.parent;
+    }
+    return source;
+}
+
+function findCallDefinition(node) {
+    if (node.callee.type === "FunctionExpression") {
+        return node.callee;
+    }
+    for (let ref of findReferences(node.callee)) {
+        if (ref.parent.type === "FunctionDeclaration" || ref.parent.type === "VariableDeclarator") {
+            return ref.parent;
+        }
+    }
+    return null;
 }
 
 async function getDependencies(name, version) {
@@ -206,11 +251,11 @@ async function renderOutput(outputPath, data) {
         "output":     resolve(outputPath),
     };
     let title = `${data.name || paths.output}${data.version ? `@${data.version}` : ""}`;
-    let html = await ejs.renderFile(paths.template, { title, paths, data });
+    let html = await ejs.renderFile(paths.template, { title, paths, "data": data.data });
     return writeFile(resolve(outputPath, "./luna.html"), html);
 }
 
-(async() => {
+(async function main() {
     let getFiles = promisify(glob);
     // all javascript files in the project (excluding node_modules)
     let pattern = resolve(`${srcPath}/{,!(node_modules)/**/}*.{js,mjs}`).replace(/\\/g, "/");
@@ -221,6 +266,7 @@ async function renderOutput(outputPath, data) {
     let node_modules = await getNodeModules(hasNodeModules, dependencies, devDependencies);
     let externalLibs = Object.keys(dependencies || {}).concat(Object.keys(devDependencies || {}));
     let libs = {};
+    let calls = {};
 
     for (const file of srcFiles) {
         try {
@@ -235,6 +281,60 @@ async function renderOutput(outputPath, data) {
                 libsInFile[libName] = libName.toString().toLowerCase()
                     .endsWith(".json") ? {} : discoverAPI(ast, parent); // API of lib (don't find API of json files)
             };
+
+            calls[file] = {};
+            let saveCall = async(source, target, node) => {
+                if (!source || !target) {
+                    return;
+                }
+                // let parentPath = dirname(file);
+                // eslint-disable-next-line no-nested-ternary
+                let sourceLabel = source.type === "Program" ? "(toplevel)" : (source.id ? source.id.name : "(anonymous)");
+                let sourceId = `${sourceLabel}-${source.start}-${source.end}`;
+                let targetLabel = target.id ? target.id.name : "(anonymous)";
+                let targetId = `${targetLabel}-${target.start}-${target.end}`;
+                let edgeId = `${relative(srcPath, file)} | ${sourceId} -> ${targetId}`;
+
+                let caller = {
+                    "type":  node.type,
+                    "start": node.start,
+                    "end":   node.end,
+                };
+
+                // node (source)
+                calls[file][sourceId] = {
+                    "data": {
+                        caller,
+                        "label":  sourceLabel,
+                        "color":  "#fff",
+                        "id":     sourceId,
+                        "parent": relative(srcPath, file), // TODO: parent
+                        "type":   "Function call",
+                    },
+                };
+                // node (target)
+                calls[file][targetId] = {
+                    "data": {
+                        caller,
+                        "label":  targetLabel,
+                        "color":  "#fff",
+                        "id":     targetId,
+                        "parent": relative(srcPath, file), // TODO: parent
+                        "type":   "Function call",
+                    },
+                };
+                // edge
+                calls[file][edgeId] = {
+                    "data": {
+                        caller,
+                        "source": sourceId,
+                        "target": targetId,
+                        "color":  "#fff",
+                        "id":     edgeId,
+                    },
+                };
+            };
+
             astWalk(ast, (node, parents) => {
                 let parent = parents[parents.length - 2];
                 if (node.type === "ImportDeclaration") {
@@ -245,6 +345,12 @@ async function renderOutput(outputPath, data) {
                     }
                     saveLib(libName, parent);
                 } else if (node.type === "CallExpression") {
+                    // call -> findscope -> subroutine (source)
+                    // /    -> findref -> definition (target)
+                    let source = findCallSource(node);
+                    let target = findCallDefinition(node);
+                    saveCall(source, target, node);
+
                     if (node.callee.name === "require") {
                         // 'require' only takes 1 argument: https://nodejs.org/api/modules.html#requireid
                         let argNode = node.arguments[0];
@@ -272,6 +378,10 @@ async function renderOutput(outputPath, data) {
         }
     }
 
+    if (debug) {
+        console.log(JSON.stringify(calls, null, 2));
+    }
+
     // GROUPS
     let treeData = [
         { "data": { "label": "Source Code", "color": "#fff", "id": "files", "group": true } },
@@ -280,8 +390,10 @@ async function renderOutput(outputPath, data) {
         { "data": { "label": "Internal", "color": "#fff", "parent": "libs", "id": "internal", "group": true } },
         { "data": { "label": "External", "color": "#fff", "parent": "libs", "id": "external", "group": true } },
         { "data": { "label": "Dependency Tree", "color": "#fff", "id": "deps", "group": true } },
+        ...Object.values(calls).flat()
+            .map((e) => Object.values(e))
+            .flat(),
     ];
-    // let filesTreeData = {};
 
     // COLORS
     let libSet = Array.from(new Set(Object.values(libs).map((lib) => Object.keys(lib))
@@ -297,11 +409,12 @@ async function renderOutput(outputPath, data) {
 
     // FILES & LIBRARIES
     for (let file in libs) {
-        let isRootFile = relative(srcPath, dirname(file)) === "";
+        let parentPath = dirname(file);
+        let isRootFile = relative(srcPath, parentPath) === "";
         let fileId = relative(srcPath, file);
         let fileName = basename(file);
         let fileExt = extname(file);
-        let parentFolder = basename(dirname(file));
+        // let parentFolder = basename(parentPath);
 
         let addParentGroup = (dir) => {
             let parentFolder = basename(dir);
@@ -317,7 +430,7 @@ async function renderOutput(outputPath, data) {
                     "group":  true,
                     "color":  "#fff",
                     "parent": isParentRoot ? "files" : parentParentFolder,
-                    "id":     parentFolder,
+                    "id":     dir,
                 },
             });
             if (!isParentRoot) {
@@ -332,17 +445,16 @@ async function renderOutput(outputPath, data) {
         // node
         treeData.push({
             "data": {
-                "id":     fileId,
-                "isData": fileExt === ".json",
-                "color":  "#fff",
-                "path":   file,
-                "parent": isRootFile ? "files" : parentFolder,
-                "label":  fileName,
-                "isMain": main ? resolve(file) === resolve(srcPath, main) : false,
+                "id":       fileId,
+                "isData":   fileExt === ".json",
+                "color":    "#fff",
+                "filePath": file,
+                "parent":   isRootFile ? "files" : parentPath,
+                "label":    fileName,
+                "isMain":   main ? resolve(file) === resolve(srcPath, main) : false,
+                "group":    true,
             },
         });
-
-        // filesTreeData[fileId] = [];
 
         for (let libName in libs[file]) {
             let id = libName;
@@ -383,8 +495,6 @@ async function renderOutput(outputPath, data) {
 
             let recurseApi = (libName, api, source) => {
                 for (let name in api) {
-                    // if (!name || !source || name === "undefined" || source === "undefined") { console.log(api.undefined); }
-
                     if (source) {
                         // node
                         treeData.push({
@@ -500,8 +610,6 @@ async function renderOutput(outputPath, data) {
     renderOutput(srcPath, {
         name,
         version,
-        "main":  treeData,
-        "files": treeData,
-        // "files": filesTreeData,
+        "data": treeData,
     });
 })();

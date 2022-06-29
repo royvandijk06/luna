@@ -34,7 +34,7 @@ function unfade(element) {
     }, 10);
 }
 
-function setInfoPanel({ id, type, library, path, isData, label, parent }) {
+function setInfoPanel({ id, type, library, filePath, isData, label, parent }) {
     let infoPanel = document.querySelector("#info");
     infoPanel.style.display = "block";
     infoPanel.dataset.nodeId = id;
@@ -46,7 +46,7 @@ function setInfoPanel({ id, type, library, path, isData, label, parent }) {
             type = "data";
         } else if (library) {
             type = "library";
-        } else if (path) {
+        } else if (filePath) {
             type = "source code";
         }
     }
@@ -61,8 +61,8 @@ function setInfoPanel({ id, type, library, path, isData, label, parent }) {
             html += `<tr><td><b>NPM:</b></td><td><a href="https://www.npmjs.com/package/${library.name}${isValidVersion ? `/v/${library.version}` : ""}" target="_blank">${library.name} &#128279;&#xFE0E;</a></td></tr>`;
         }
     }
-    if (path) {
-        html += `<tr><td><b>Path:</b></td><td>${path}</td></tr>`;
+    if (filePath) {
+        html += `<tr><td><b>Path:</b></td><td>${filePath}</td></tr>`;
     }
     html += "</table><br>";
     infoContent.innerHTML = html;
@@ -86,7 +86,7 @@ function highlightNode(node) {
 function makeCy(style, layout) {
     window.cy = cytoscape({
         "container":           document.querySelector("#cy"),
-        "elements":            window.data.main,
+        "elements":            window.data,
         style,
         layout,
         "wheelSensitivity":    0.1,
@@ -122,11 +122,16 @@ function makeCy(style, layout) {
         let api = window.cy.expandCollapse("get");
         window.cy.nodes().on("expandcollapse.aftercollapse", (evt) => {
             evt.target.data("collapsed", false);
-            api.collapseAllEdges();
+            // api.collapseAllEdges();
+            for (let node of evt.target.connectedEdges()
+                .connectedNodes()) {
+                api.collapseEdges(node.edgesTo(evt.target));
+                api.collapseEdges(evt.target.edgesTo(node));
+            }
         });
         window.cy.nodes().on("expandcollapse.afterexpand", (evt) => {
             evt.target.data("collapsed", true);
-            api.collapseAllEdges();
+            // api.collapseAllEdges();
             // redo highlighting (if enabled)
             if (isHighlighted) {
                 isHighlighted = false;
@@ -134,38 +139,11 @@ function makeCy(style, layout) {
             }
             // document.querySelector("#centerBtn").click();
         });
-        api.collapse(window.cy.elements("#deps, node[group][library]"));
+        api.collapse(window.cy.elements("#deps, node[group][library], node[group][filePath]"));
     });
 
     window.cy.nodes().on("click", () => {
         document.querySelector("#lockBtn").click();
-        // let clickedNode = e.target;
-        // let id = clickedNode.data("id");
-        // let library = clickedNode.data("library");
-
-        // if (clickedNode.data("parent") === "external" || clickedNode.data("parent") === "deps") {
-        //     let isValidVersion = /^[a-z0-9.]+$/i.test(library.version); // good version validation?
-        //     window.open(`https://www.npmjs.com/package/${library.name}${isValidVersion ? `/v/${library.version}` : ""}`, "_blank");
-        //     return;
-        // }
-
-        // if (!window.data.files[id]) {
-        //     return;
-        // }
-
-        // window.cy = cytoscape({
-        //     "container":           document.querySelector("#cy"),
-        //     "elements":            window.data.files[id],
-        //     style,
-        //     layout,
-        //     "wheelSensitivity":    0.1,
-        //     "headless":            false,
-        //     "boxSelectionEnabled": false,
-        // });
-
-        // document.querySelector("#info").style.display = "none";
-        // document.querySelector("#bShowData").style.display = "none";
-        // document.querySelector("[for=bShowData]").style.display = "none";
     });
 
     window.cy.on("mouseover", "node[^group], node[library]", (evt) => {
@@ -204,36 +182,38 @@ function pageReady() {
     cyDataEnabled = settingsPanel.bShowData.checked;
 
     const layout = {
-        "name":              "dagre",
-        "rankDir":           "LR",
+        "name":                        "dagre",
+        "rankDir":                     "LR",
         // "rankDir":           "TB",
         // "align":   "UR",
         // "ranker":  "longest-path",
         // "ranker":  "tight-tree",
         // "ranker":  "network-simplex",
-        "nodeSep":           0, // the separation between adjacent nodes in the same rank
+        "nodeSep":                     0, // the separation between adjacent nodes in the same rank
         // "edgeSep": 10, // the separation between adjacent edges in the same rank
         // "rankSep": 100, // the separation between each rank in the layout
-        "fit":               true, // whether to fit to viewport
-        "padding":           10, // fit padding
-        "animate":           true,
-        "animationDuration": 1500,
+        "padding":                     10, // fit padding
+        "animate":                     true,
+        "animationDuration":           1500,
+        "directed":                    true, // whether the tree is directed
+        "avoidOverlap":                true, // prevents node overlap, may
+        "nodeDimensionsIncludeLabels": true, // Excludes the label when
 
         // "name":                        "breadthfirst",
         // "fit":                         true, // whether to fit the viewport to the graph
         // "directed":                    true, // whether the tree is directed downwards (or edges can point in any direction if false)
-        // "padding":                     0, // padding on fit
-        // "circle":                      false, // put depths in concentric circles if true, put depths top down if false
-        // "grid":                        false, // whether to create an even grid into which the DAG is placed (circle:false only)
-        // "spacingFactor":               1, // positive spacing factor, larger => more space between nodes (N.B. n/a if causes overlap)
-        // "boundingBox":                 undefined, // constrain layout bounds; { x1, y1, x2, y2 } or { x1, y1, w, h }
-        "avoidOverlap":                true, // prevents node overlap, may overflow boundingBox if not enough space
-        "nodeDimensionsIncludeLabels": true, // Excludes the label when calculating node bounding boxes for the layout algorithm
-        // "roots":                       undefined, // the roots of the trees
-        // "maximal":                     true, // whether to shift nodes down their natural BFS depths in order to avoid upwards edges (DAGS only)
-        // "depthSort":                   undefined, // a sorting function to order nodes at equal depth. e.g. function(a, b){ return a.data('weight') - b.data('weight') }
-        // "animate":                     false, // whether to transition the node positions
-        // "animationDuration":           500, // duration of animation in ms if enabled
+        // // "padding":                     0, // padding on fit
+        // // "circle":                      false, // put depths in concentric circles if true, put depths top down if false
+        // // "grid":                        false, // whether to create an even grid into which the DAG is placed (circle:false only)
+        // "spacingFactor":               0.25, // positive spacing factor, larger => more space between nodes (N.B. n/a if causes overlap)
+        // // "boundingBox":                 undefined, // constrain layout bounds; { x1, y1, x2, y2 } or { x1, y1, w, h }
+        // "avoidOverlap":                true, // prevents node overlap, may overflow boundingBox if not enough space
+        // "nodeDimensionsIncludeLabels": true, // Excludes the label when calculating node bounding boxes for the layout algorithm
+        // // "roots":                       undefined, // the roots of the trees
+        // // "maximal":                     true, // whether to shift nodes down their natural BFS depths in order to avoid upwards edges (DAGS only)
+        // // "depthSort":                   undefined, // a sorting function to order nodes at equal depth. e.g. function(a, b){ return a.data('weight') - b.data('weight') }
+        // // "animate":                     false, // whether to transition the node positions
+        // // "animationDuration":           500, // duration of animation in ms if enabled
     };
 
     const style = [
@@ -259,7 +239,7 @@ function pageReady() {
             },
         },
         {
-            "selector": ":parent, node[?group][^library]",
+            "selector": ":parent, node[?group][^library][^filePath]",
             "css":      {
                 "background-color":   "data(color)",
                 "background-opacity": 0.1,
