@@ -45,8 +45,14 @@ function findReferences(node) {
 function discoverAPI(ast, parent, _api = {}) {
     let api = _api;
     let addToAPI = (name, node) => {
+        // eslint-disable-next-line no-use-before-define
+        let source = findCallSource(node);
+        // eslint-disable-next-line no-nested-ternary
+        let sourceLabel = source.type === "Program" ? "(toplevel)" : (source.id ? source.id.name : "(anonymous)");
+        let sourceId = `${sourceLabel}-${source.start}-${source.end}`;
         api[name] = api[name] || {};
         api[name].name = name;
+        api[name].sourceId = sourceId;
         api[name].nodes = (api[name].nodes || []).concat([node]);
         for (let ref of findReferences(node)) {
             api[name].children = discoverAPI(ast, ref.parent, api[name].children);
@@ -65,7 +71,12 @@ function discoverAPI(ast, parent, _api = {}) {
             }
         }
     } else if (parent.id) { // variable name
+        let added = false;
         for (let ref of findReferences(parent.id)) {
+            if (ref.parent.type === "CallExpression" && !added) { // lib variable is a function
+                addToAPI(`(reference)\nas "${parent.id.name}"`, parent.id);
+                added = true;
+            }
             api = discoverAPI(ast, ref.parent, api);
         }
     } else if (parent.type === "NewExpression") { // new instance of library
@@ -240,15 +251,23 @@ function constructString(node) {
 
 async function renderOutput(outputPath, data) {
     let paths = {
-        "cy":         resolve(__dirname, "assets", "cytoscape.min.js"),
-        "cyCollapse": resolve(__dirname, "assets", "cytoscape-expand-collapse.js"),
-        "dagre":      resolve(__dirname, "assets", "dagre.js"),
-        "cyDagre":    resolve(__dirname, "assets", "cytoscape-dagre.js"),
-        "cySetup":    resolve(__dirname, "assets", "cytoscape-setup.js"),
-        "css":        resolve(__dirname, "assets", "stylesheet.css"),
-        "template":   resolve(__dirname, "assets", "template.ejs"),
-        "loader":     resolve(__dirname, "assets", "loader.svg"),
-        "output":     resolve(outputPath),
+        "cy":            resolve(__dirname, "assets", "cytoscape.min.js"),
+        "cyCollapse":    resolve(__dirname, "assets", "cytoscape-expand-collapse.js"),
+        "elk":           resolve(__dirname, "assets", "elk.bundled.js"),
+        "cyElk":         resolve(__dirname, "assets", "cytoscape-elk.js"),
+        "cola":          resolve(__dirname, "assets", "cola.min.js"),
+        "cyCola":        resolve(__dirname, "assets", "cytoscape-cola.js"),
+        // "dagre":      resolve(__dirname, "assets", "dagre.js"),
+        // "cyDagre":    resolve(__dirname, "assets", "cytoscape-dagre.js"),
+        "shim":          resolve(__dirname, "assets", "shim.min.js"),
+        "layoutBase":    resolve(__dirname, "assets", "layout-base.js"),
+        "coseBase":      resolve(__dirname, "assets", "cose-base.js"),
+        "cyCoseBilkent": resolve(__dirname, "assets", "cytoscape-cose-bilkent.js"),
+        "cySetup":       resolve(__dirname, "assets", "cytoscape-setup.js"),
+        "css":           resolve(__dirname, "assets", "stylesheet.css"),
+        "template":      resolve(__dirname, "assets", "template.ejs"),
+        "loader":        resolve(__dirname, "assets", "loader.svg"),
+        "output":        resolve(outputPath),
     };
     let title = `${data.name || paths.output}${data.version ? `@${data.version}` : ""}`;
     let html = await ejs.renderFile(paths.template, { title, paths, "data": data.data });
@@ -265,12 +284,17 @@ async function renderOutput(outputPath, data) {
         .catch(() => false);
     let node_modules = await getNodeModules(hasNodeModules, dependencies, devDependencies);
     let externalLibs = Object.keys(dependencies || {}).concat(Object.keys(devDependencies || {}));
+    let srcContents = {};
     let libs = {};
     let calls = {};
 
     for (const file of srcFiles) {
+        if (debug && file.includes("assets")) {
+            continue;
+        }
         try {
             const code = await readFile(file);
+            srcContents[file] = code.toString();
             const ast = AST.parse(code, { "ecmaVersion": "latest", "sourceType": "module" });
 
             scan.createScope(ast, ["module", "require", "exports", "__dirname", "__filename"]);
@@ -421,16 +445,17 @@ async function renderOutput(outputPath, data) {
             if (treeData.find((node) => node.data.id === parentFolder)) {
                 return;
             }
-            let parentParentFolder = basename(dirname(dir));
+            let parentParentFolder = dirname(dir);
             let isParentRoot = relative(srcPath, dirname(dir)) === "";
             // group
             treeData.push({
                 "data": {
-                    "label":  `/${parentFolder}`,
-                    "group":  true,
-                    "color":  "#fff",
-                    "parent": isParentRoot ? "files" : parentParentFolder,
-                    "id":     dir,
+                    "label":    `/${parentFolder}`,
+                    "group":    true,
+                    "color":    "#fff",
+                    "parent":   isParentRoot ? "files" : parentParentFolder,
+                    "id":       dir,
+                    "isFolder": true,
                 },
             });
             if (!isParentRoot) {
@@ -449,10 +474,14 @@ async function renderOutput(outputPath, data) {
                 "isData":   fileExt === ".json",
                 "color":    "#fff",
                 "filePath": file,
-                "parent":   isRootFile ? "files" : parentPath,
-                "label":    fileName,
-                "isMain":   main ? resolve(file) === resolve(srcPath, main) : false,
-                "group":    true,
+                "size":     {
+                    "loc":   srcContents[file].split("\n").length,
+                    "chars": srcContents[file].length,
+                },
+                "parent": isRootFile ? "files" : parentPath,
+                "label":  fileName,
+                "isMain": main ? resolve(file) === resolve(srcPath, main) : false,
+                "group":  true,
             },
         });
 
@@ -532,7 +561,8 @@ async function renderOutput(outputPath, data) {
                         "data": {
                             "id":     `${libName} -> ${name}`,
                             "color":  "#fff",
-                            "source": fileId,
+                            // "source": fileId,
+                            "source": treeData.find((e) => e.data.id === api[name].sourceId) ? api[name].sourceId : fileId, // Workaround, TODO: Fix this
                             "target": `${libName} | ${name}`,
                         },
                     });

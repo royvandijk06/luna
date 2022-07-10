@@ -8,8 +8,14 @@
         </title>
         <script src="<%= paths.cy %>"></script>
         <script src="<%= paths.cyCollapse %>"></script>
-        <script src="<%= paths.dagre %>"></script>
-        <script src="<%= paths.cyDagre %>"></script>
+        <script src="<%= paths.elk %>"></script>
+        <script src="<%= paths.cyElk %>"></script>
+        <script src="<%= paths.cola %>"></script>
+        <script src="<%= paths.cyCola %>"></script>
+        <script src="<%= paths.shim %>"></script>
+        <script src="<%= paths.layoutBase %>"></script>
+        <script src="<%= paths.coseBase %>"></script>
+        <script src="<%= paths.cyCoseBilkent %>"></script>
         <link rel="stylesheet" href="<%= paths.css %>">
     </head>
 
@@ -19,9 +25,40 @@
             </h1>
             <div id="settings">
                 <h3>Graph</h3>
-                <input type="checkbox" id="bShowData" name="bShowData" checked></input>
-                <label for="bShowData">Show data (JSON) imports</label>
-                <br><br>
+                <table>
+                    <tr>
+                        <td><b><label for="bShowData">Show Data Imports:</label></b></td>
+                        <td><input type="checkbox" id="bShowData" name="bShowData" checked></input></td>
+                    </tr>
+                    <tr>
+                        <td><b><label for="spacing">Spacing Factor:</label></b></td>
+                        <td><input type="number" value="1" step="0.1" min="0" id="spacing" name="spacing"></input></td>
+                    </tr>
+                    <tr>
+                        <td><b>Layout Algorithm:</b></td>
+                        <td>
+                            <select id="layout">
+                                <option value="breadthfirst">breadthfirst</option>
+                                <option value="cola">Cola</option>
+                                <option value="cose-bilkent">Cose-Bilkent</option>
+                                <option value="layered">Elk: Layered</option>
+                                <option value="mrtree">Elk: Mr. Tree</option>
+                            </select>
+                    </tr>
+                    <tr>
+                        <td><b>Highlight File:</b></td>
+                        <td>
+                            <select id="fileSelect">
+                            </select>
+                    </tr>
+                    <tr>
+                        <td><b>Highlight Library:</b></td>
+                        <td>
+                            <select id="libSelect">
+                            </select>
+                    </tr>
+                </table>
+                <br>
                 <center>
                     <button id="imgBtn">&#x25EA;</button>
                     <button id="fitBtn">Fit</button>
@@ -33,7 +70,8 @@
                 <h3>Node</h3>
                 <div id="info-content"></div>
                 <center>
-                    <button id="lockBtn">&#128275;&#xFE0E;</button>
+                    <button id="lockBtn"
+                        title="Lock focus on this node. Shortcut: Shift + click">&#128275;&#xFE0E;</button>
                     <button id="centerBtn">Center</button>
                     <button id="highlightBtn">Highlight</button>
                 </center>
