@@ -11,17 +11,20 @@ class LUNA {
         this.data = input;
         this.isLocked = false;
         this.selectedNodes = new Set();
+        this.trashBin = {};
         this.DOM = {
             "settingsPanel": {
-                "container":  document.querySelector("#settings"),
-                "bShowData":  document.querySelector("#bShowData"), // show data (.json files)
-                "spacing":    document.querySelector("#spacing"), // change spacing
-                "layout":     document.querySelector("#layout"), // change layout
-                "fileSelect": document.querySelector("#fileSelect"), // select file node to highlight
-                "libSelect":  document.querySelector("#libSelect"), // select library node to highlight
-                "fitBtn":     document.querySelector("#fitBtn"), // reset cytoscape
-                "resetBtn":   document.querySelector("#resetBtn"), // fit cytoscape
-                "imgBtn":     document.querySelector("#imgBtn"), // save img cytoscape
+                "container": document.querySelector("#settings"),
+                "bShowData": document.querySelector("#bShowData"), // show data (.json files)
+                "spacing":   document.querySelector("#spacing"), // change spacing
+                "layout":    document.querySelector("#layout"), // change layout
+                "fileTree":  document.querySelector("#fileTree"), // manipulate file nodes
+                "libTree":   document.querySelector("#libTree"), // manipulate library nodes
+                // "fileSelect": document.querySelector("#fileSelect"), // select file node to highlight
+                // "libSelect":  document.querySelector("#libSelect"), // select library node to highlight
+                "fitBtn":    document.querySelector("#fitBtn"), // reset cytoscape
+                "resetBtn":  document.querySelector("#resetBtn"), // fit cytoscape
+                "imgBtn":    document.querySelector("#imgBtn"), // save img cytoscape
             },
             "infoPanel": {
                 "container":    document.querySelector("#info"),
@@ -59,7 +62,7 @@ class LUNA {
         }, 10);
     }
 
-    setInfoPanel({ id, type, library, size, filePath, isData, label, parent }) {
+    setInfoPanel({ id, type, library, size, filePath, isData, label, parent, caller }) {
         this.DOM.infoPanel.container.style.display = "block";
         this.DOM.infoPanel.container.dataset.nodeId = id;
         let html = `<table><tr><td><b>Label:</b></td><td>${label}</td></tr>`;
@@ -81,15 +84,20 @@ class LUNA {
             }
             if (parent === "external" || parent === "deps") {
                 let isValidVersion = /^[a-z0-9.]+$/i.test(library.version); // good version validation?
-                html += `<tr><td><b>NPM:</b></td><td><a href="https://www.npmjs.com/package/${library.name}${isValidVersion ? `/v/${library.version}` : ""}" target="_blank">${library.name}</a> &#128279;&#xFE0E;</td></tr>`;
+                html += `<tr><td><b>NPM:</b></td><td><a href="https://www.npmjs.com/package/${library.name}${isValidVersion ? `/v/${library.version}` : ""}" target="_blank">${library.name} <i class="fa-solid fa-arrow-up-right-from-square"></i></a></td></tr>`;
             }
         }
         if (size) {
             html += `<tr><td><b>LOC:</b></td><td>${size.loc}</td></tr>`;
             html += `<tr><td><b>Characters:</b></td><td>${size.chars}</td></tr>`;
         }
+        if (caller) {
+            let fileNode = this.cy.$id(parent);
+            filePath = fileNode.data("filePath");
+            html += `<tr><td><b>Position:</b></td><td>${caller.start}</td></tr>`;
+        }
         if (filePath) {
-            html += `<tr><td><b>Path:</b></td><td><a href="${filePath}" target="_blank">${filePath}</a> &#128279;&#xFE0E;</td></tr>`;
+            html += `<tr><td><b>Path:</b></td><td><a href="javascript:void()" data-file-path="${filePath}" onclick="window.open(this.dataset.filePath,this.dataset.filePath,'directories=0,titlebar=0,toolbar=0,location=0,status=0,menubar=0,scrollbars=no')" target="_blank">${filePath} <i class="fa-solid fa-arrow-up-right-from-square"></i></a></td></tr>`;
         }
         html += "</table><br>";
         this.DOM.infoPanel.content.innerHTML = html;
@@ -160,7 +168,7 @@ class LUNA {
             });
             let api = this.cy.expandCollapse("get");
             this.cy.nodes().on("expandcollapse.aftercollapse", (evt) => {
-                evt.target.data("collapsed", false);
+                evt.target.data("collapsed", true);
                 // api.collapseAllEdges();
                 for (let node of evt.target.connectedEdges()
                     .connectedNodes()) {
@@ -171,7 +179,7 @@ class LUNA {
                 this.highlightNodes();
             });
             this.cy.nodes().on("expandcollapse.afterexpand", (evt) => {
-                evt.target.data("collapsed", true);
+                evt.target.data("collapsed", false);
                 this.selectedNodes.delete(evt.target.id());
                 this.highlightNodes();
                 // this.DOM.infoPanel.centerBtn.click();
@@ -215,11 +223,13 @@ class LUNA {
             }
         });
 
-        this.cy.on("mouseover", "node[^group], node[library], node[filePath]", (evt) => {
+        // this.cy.on("mouseover", "node[^group], node[library], node[filePath]", (evt) => {
+        this.cy.on("mouseover", "node", (evt) => {
             if (this.isLocked) {
                 return;
             }
             let node = evt.target;
+            // node.select();
             if (node.is(":compound")) {
                 return;
             }
@@ -234,6 +244,7 @@ class LUNA {
                 return;
             }
             let node = evt.target;
+            // node.unselect();
             if (node.is(":compound")) {
                 return;
             }
@@ -448,7 +459,17 @@ class LUNA {
                     "text-transform":     "uppercase",
                     "text-margin-y":      -5,
                     "text-max-width":     200,
-
+                    "shape":              "rectangle",
+                },
+            },
+            {
+                "selector": ":parent[?collapsed], node[?group][^library][^filePath][?collapsed]",
+                "css":      {
+                    "background-color":   "#fff",
+                    "background-opacity": 0.1,
+                    "shape":              "rectangle",
+                    "border-color":       "#fff",
+                    "border-width":       1,
                 },
             },
             {
@@ -472,9 +493,11 @@ class LUNA {
                 "selector": "node[filePath]",
                 "style":    {
                     "background-image":             "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB2ZXJzaW9uPSIxLjAiPjxnIGNsYXNzPSJwcmVmaXhfX2xheWVyIj48cGF0aCBkPSJNNjMuMzMgMzYuNjdBNi42NyA2LjY3IDAgMDE1Ni42NyAzMFYxMEgyMy4zM2E2LjY2IDYuNjYgMCAwMC02LjY2IDYuNjd2NjYuNjZBNi42NyA2LjY3IDAgMDAyMy4zMyA5MGg1My4zNGE2LjY3IDYuNjcgMCAwMDYuNjYtNi42N1YzNi42N2gtMjB6bS0yMi44NCAzNC44TDM2Ljk1IDc1bC05LjMxLTkuMzFhMy4zMyAzLjMzIDAgMDEwLTQuNzFsOS4zMS05LjMxIDMuNTQgMy41My04LjEzIDguMTMgOC4xMyA4LjEzdi4wMXptMTAuMzYgNS4yaC01LjA0TDQ5LjE1IDUwaDUuMDRsLTMuMzQgMjYuNjd6bTIxLjUxLTEwLjk4TDYzLjA1IDc1bC0zLjU0LTMuNTMgOC4xMy04LjE0LTguMTMtOC4xMyAzLjU0LTMuNTMgOS4zMSA5LjMxYTMuMzMgMy4zMyAwIDAxMCA0LjcxeiIgZmlsbD0iI2ZmZiIvPjxwYXRoIGQ9Ik02My4zMyAzMGgyMGwtMjAtMjB2MjB6IiBmaWxsPSIjZmZmIi8+PC9nPjwvc3ZnPg==",
+                    // "background-image":             "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzODQgNTEyIj48IS0tISBGb250IEF3ZXNvbWUgUHJvIDYuMS4xIGJ5IEBmb250YXdlc29tZSAtIGh0dHBzOi8vZm9udGF3ZXNvbWUuY29tIExpY2Vuc2UgLSBodHRwczovL2ZvbnRhd2Vzb21lLmNvbS9saWNlbnNlIChDb21tZXJjaWFsIExpY2Vuc2UpIENvcHlyaWdodCAyMDIyIEZvbnRpY29ucywgSW5jLi0tPjxwYXRoIGZpbGw9IiNmZmYiIGQ9Ik0yMjQgMTI4VjBINDhDMjEuNDkgMCAwIDIxLjQ5IDAgNDh2NDE2YzAgMjYuNSAyMS40OSA0OCA0OCA0OGgyODhjMjYuNTEgMCA0OC0yMS40OSA0OC00OFYxNjBIMjU2LjljLTE4LjYgMC0zMi45LTE0LjMtMzIuOS0zMnptLTY5LjkgMjI1LjhjNy44MTIgNy44MTIgNy44MTIgMjAuNSAwIDI4LjMxLTMuOSAzLjk5LTkgNS44OS0xNC4xIDUuODlzLTEwLjIzLTEuOTM4LTE0LjE0LTUuODQ0bC00OC00OGMtNy44MTItNy44MTItNy44MTItMjAuNSAwLTI4LjMxbDQ4LTQ4YzcuODEyLTcuODEyIDIwLjQ3LTcuODEyIDI4LjI4IDBzNy44MTIgMjAuNSAwIDI4LjMxTDEyMC4zIDMyMGwzMy44IDMzLjh6bTE1Mi00OGM3LjgxMiA3LjgxMiA3LjgxMiAyMC41IDAgMjguMzFsLTQ4IDQ4Yy0zLjkgMy45OS05IDUuODktMTQuMSA1Ljg5cy0xMC4yMy0xLjkzOC0xNC4xNC01Ljg0NGMtNy44MTItNy44MTItNy44MTItMjAuNSAwLTI4LjMxTDI2My43IDMyMGwtMzMuODYtMzMuODRjLTcuODEyLTcuODEyLTcuODEyLTIwLjUgMC0yOC4zMXMyMC40Ny03LjgxMiAyOC4yOCAwbDQ3Ljk4IDQ3Ljk1ek0yNTYgMHYxMjhoMTI4TDI1NiAweiIvPjwvc3ZnPg==",
                     // "background-fit":               "cover cover",
                     "background-fit":               "contain",
-                    "background-image-containment": "over",
+                    // "background-image-containment": "over",
+                    "background-image-containment": "inside",
                     "background-clip":              "none",
                     "background-opacity":           "0",
                     "border-width":                 0,
@@ -493,7 +516,7 @@ class LUNA {
             {
                 "selector": "node[?isFolder]",
                 "style":    {
-                // "background-image":             "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHBhdGggZmlsbC1ydWxlPSJldmVub2RkIiBjbGlwLXJ1bGU9ImV2ZW5vZGQiIGQ9Ik0yIDlhMyAzIDAgMDEzLTNoMTRhMyAzIDAgMDEzIDN2OGEzIDMgMCAwMS0zIDNINWEzIDMgMCAwMS0zLTNWOXptMy0xYTEgMSAwIDAwLTEgMXY4YTEgMSAwIDAwMSAxaDE0YTEgMSAwIDAwMS0xVjlhMSAxIDAgMDAtMS0xSDV6IiBmaWxsPSIjZmZmIi8+PHBhdGggZmlsbC1ydWxlPSJldmVub2RkIiBjbGlwLXJ1bGU9ImV2ZW5vZGQiIGQ9Ik0yIDdhMyAzIDAgMDEzLTNoNmEzIDMgMCAwMTMgMyAxIDEgMCAxMS0yIDAgMSAxIDAgMDAtMS0xSDVhMSAxIDAgMDAtMSAxdjJhMSAxIDAgMDEtMiAwVjd6IiBmaWxsPSIjZmZmIi8+PC9zdmc+",
+                    // "background-image":             "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHBhdGggZmlsbC1ydWxlPSJldmVub2RkIiBjbGlwLXJ1bGU9ImV2ZW5vZGQiIGQ9Ik0yIDlhMyAzIDAgMDEzLTNoMTRhMyAzIDAgMDEzIDN2OGEzIDMgMCAwMS0zIDNINWEzIDMgMCAwMS0zLTNWOXptMy0xYTEgMSAwIDAwLTEgMXY4YTEgMSAwIDAwMSAxaDE0YTEgMSAwIDAwMS0xVjlhMSAxIDAgMDAtMS0xSDV6IiBmaWxsPSIjZmZmIi8+PHBhdGggZmlsbC1ydWxlPSJldmVub2RkIiBjbGlwLXJ1bGU9ImV2ZW5vZGQiIGQ9Ik0yIDdhMyAzIDAgMDEzLTNoNmEzIDMgMCAwMTMgMyAxIDEgMCAxMS0yIDAgMSAxIDAgMDAtMS0xSDVhMSAxIDAgMDAtMSAxdjJhMSAxIDAgMDEtMiAwVjd6IiBmaWxsPSIjZmZmIi8+PC9zdmc+",
                     "background-image":             "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjI1LjY5MyIgaGVpZ2h0PSIyMjUuNjkzIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxnIGNsYXNzPSJwcmVmaXhfX2xheWVyIj48cGF0aCBkPSJNOC40MyA3OC4zNWgyMDguODRjMi4zOSAwIDQuNTkuOTcgNi4yMSAyLjczczIuMzkgNC4wNCAyLjE4IDYuNDJsLTEwLjIyIDExNy4xNWMtLjM5IDQuMzktMy45OSA3LjctOC40IDcuN0gyMS40Yy00LjMgMC03LjktMy4yMy04LjM3LTcuNUwuMDUgODcuN2MtLjI2LTIuNDIuNDgtNC43NCAyLjEtNi41NSAxLjYyLTEuODEgMy44NS0yLjggNi4yOC0yLjh6bTIwNi4wOC0xNVY0NC44MWMwLTQuMTQtMi41Mi03LjQ2LTYuNjYtNy40NmgtODMuMzR2LTIuMzRjMC0xMi4yMi04LjE3LTIxLjY2LTE5LjI1LTIxLjY2SDMwLjQzYy0xMS4wNyAwLTIwLjkyIDkuNDQtMjAuOTIgMjEuNjZ2MjQuOTVjMCAxLjIzLjY4IDIuMzggMS4yNyAzLjM5aDIwMy43M3oiIGZpbGw9IiNmZmYiLz48L2c+PC9zdmc+",
                     "background-fit":               "contain",
                     "background-image-containment": "over",
@@ -517,6 +540,7 @@ class LUNA {
                 "selector": "node[library]",
                 "style":    {
                     "background-image":             "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBjbGFzcz0icHJlZml4X19sYXllciI+PHBhdGggZD0iTTY0IDQ3OUg0OGEzMiAzMiAwIDAxLTMyLTMyVjExMWEzMiAzMiAwIDAxMzItMzJoMTZhMzIgMzIgMCAwMTMyIDMydjMzNmEzMiAzMiAwIDAxLTMyIDMyek0yNDAgMTc1YTMyIDMyIDAgMDAtMzItMzJoLTY0YTMyIDMyIDAgMDAtMzIgMzJ2MjhhNCA0IDAgMDA0IDRoMTIwYTQgNCAwIDAwNC00di0yOHpNMTEyIDQ0N2EzMiAzMiAwIDAwMzIgMzJoNjRhMzIgMzIgMCAwMDMyLTMydi0zMGEyIDIgMCAwMC0yLTJIMTE0YTIgMiAwIDAwLTIgMnYzMHoiIGZpbGw9IiNmZmYiLz48cmVjdCBmaWxsPSIjZmZmIiBoZWlnaHQ9IjE0NCIgcng9IjIiIHJ5PSIyIiB3aWR0aD0iMTI4IiB4PSIxMTIiIHk9IjIzOSIvPjxwYXRoIGQ9Ik0zMjAgNDc5aC0zMmEzMiAzMiAwIDAxLTMyLTMyVjYzYTMyIDMyIDAgMDEzMi0zMmgzMmEzMiAzMiAwIDAxMzIgMzJ2Mzg0YTMyIDMyIDAgMDEtMzIgMzJ6TTQ5NS44OSA0NDUuNDVsLTMyLjIzLTM0MGMtMS40OC0xNS42NS0xNi45NC0yNy0zNC41My0yNS4zMWwtMzEuODUgM2MtMTcuNTkgMS42Ny0zMC42NSAxNS43MS0yOS4xNyAzMS4zNmwzMi4yMyAzNDBjMS40OCAxNS42NSAxNi45NCAyNyAzNC41MyAyNS4zMWwzMS44NS0zYzE3LjU5LTEuNjcgMzAuNjUtMTUuNzEgMjkuMTctMzEuMzZ6IiBmaWxsPSIjZmZmIi8+PC9nPjwvc3ZnPg==",
+                    // "background-image":             "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0NDggNTEyIj48IS0tISBGb250IEF3ZXNvbWUgUHJvIDYuMS4xIGJ5IEBmb250YXdlc29tZSAtIGh0dHBzOi8vZm9udGF3ZXNvbWUuY29tIExpY2Vuc2UgLSBodHRwczovL2ZvbnRhd2Vzb21lLmNvbS9saWNlbnNlIChDb21tZXJjaWFsIExpY2Vuc2UpIENvcHlyaWdodCAyMDIyIEZvbnRpY29ucywgSW5jLi0tPjxwYXRoIGZpbGw9IiNmZmYiIGQ9Ik00NDggMzM2VjQ4YzAtMjYuNTEtMjEuNS00OC00OC00OEg5NkM0Mi45OCAwIDAgNDIuOTggMCA5NnYzMjBjMCA1My4wMiA0Mi45OCA5NiA5NiA5NmgzMjBjMTcuNjcgMCAzMi0xNC4zMyAzMi0zMS4xIDAtMTEuNzItNi42MDctMjEuNTItMTYtMjcuMXYtODEuMzZjOS44LTkuNjQgMTYtMjIuMjQgMTYtMzYuNDR6TTE0My4xIDEyOGgxOTJjOS43IDAgMTYuOSA3LjIgMTYuOSAxNnMtNy4yIDE2LTE2IDE2SDE0My4xYy03LjkgMC0xNS4xLTcuMi0xNS4xLTE2czcuMi0xNiAxNS4xLTE2em0wIDY0aDE5MmM5LjcgMCAxNi45IDcuMiAxNi45IDE2cy03LjIgMTYtMTYgMTZIMTQzLjFjLTcuOSAwLTE1LjEtNy4yLTE1LjEtMTZzNy4yLTE2IDE1LjEtMTZ6TTM4NCA0NDhIOTZjLTE3LjY3IDAtMzItMTQuMzMtMzItMzJzMTQuMzMtMzIgMzItMzJoMjg4djY0eiIvPjwvc3ZnPg==",
                     "background-fit":               "contain",
                     "background-image-containment": "inside",
                     "background-clip":              "none",
@@ -553,7 +577,7 @@ class LUNA {
                     // "width":            50,
                     // "height":           50,
                     "background-color": "black",
-                    "border-color":     "white",
+                    "border-color":     "#fff",
                     "border-width":     3,
 
                 },
@@ -653,57 +677,175 @@ class LUNA {
         this.DOM.infoPanel.lockBtn.addEventListener("click", () => {
             this.isLocked = !this.isLocked;
             if (this.isLocked) {
-                this.DOM.infoPanel.lockBtn.innerHTML = "&#128274;&#xFE0E;"; // locked
+                this.DOM.infoPanel.lockBtn.innerHTML = "<i class=\"fa-solid fa-lock\"></i>"; // locked
             } else {
-                this.DOM.infoPanel.lockBtn.innerHTML = "&#128275;&#xFE0E;"; // unlocked
+                this.DOM.infoPanel.lockBtn.innerHTML = "<i class=\"fa-solid fa-lock-open\"></i>"; // unlocked
             }
         });
 
-        let fileSelect = this.data.filter((e) => e.data.filePath).reduce((o, e) => {
-            let basepath = e.data.id.replace(e.data.label, "") || "(root)";
-            o[basepath] = o[basepath] || [];
-            o[basepath].push(e.data);
-            return o;
+        let treeClickHandler = (evt) => {
+            let btn = evt.target.closest("button");
+            if (!btn) {
+                return;
+            }
+
+            if (btn.classList.contains("toggle")) {
+                let { id } = btn.parentNode;
+                if (btn.classList.contains("on")) { // hidden
+                    btn.classList.remove("on");
+                    btn.classList.add("off");
+                    let nodes = this.trashBin[id];
+                    this.cy.add(nodes);
+                    delete this.trashBin[id];
+                    let i = btn.querySelector("i");
+                    i.classList.remove("fa-eye-slash");
+                    i.classList.add("fa-eye");
+                } else { // visible
+                    btn.classList.remove("off");
+                    btn.classList.add("on");
+                    let nodes = this.cy.$id(id).remove();
+                    this.trashBin[id] = nodes;
+                    let i = btn.querySelector("i");
+                    i.classList.remove("fa-eye");
+                    i.classList.add("fa-eye-slash");
+                }
+            } else if (btn.classList.contains("highlight")) {
+                let { id } = btn.parentNode;
+                if (btn.classList.contains("on")) { // highlighted
+                    btn.classList.remove("on");
+                    btn.classList.add("off");
+                    this.selectedNodes.delete(id);
+                    let i = btn.querySelector("i");
+                    i.classList.remove("fa-solid");
+                    i.classList.add("fa-regular");
+                } else {
+                    btn.classList.remove("off");
+                    btn.classList.add("on");
+                    this.selectedNodes.add(id);
+                    let i = btn.querySelector("i");
+                    i.classList.remove("fa-regular");
+                    i.classList.add("fa-solid");
+                }
+                // let node = this.cy.$id(id);
+                // if (node.length) { this.setInfoPanel(node.data()); }
+                if (!this.isLocked) {
+                    this.DOM.infoPanel.lockBtn.click();
+                }
+                if (this.selectedNodes.size === 0) {
+                    this.DOM.infoPanel.lockBtn.click();
+                }
+                this.highlightNodes();
+            }
+        };
+
+        let paths = this.data.filter((e) => e.data.filePath);
+        let fileTree = {};
+        let sep = paths[0].data.filePath.includes("/") ? "/" : "\\";
+        let rootNode = paths.find((e) => e.data.parent === "files") || paths[0];
+        let rootDir = rootNode.data.filePath.replace(sep + rootNode.data.label, "");
+        paths.forEach((path) => {
+            let split = path.data.id.split(/\\|\\\\|\//);
+            split.reduce((r, e, i) => {
+                if (r[e]) {
+                    return r[e];
+                } else if (i === split.length - 1) {
+                    return (r[e] = path.data.id);
+                }
+                return (r[e] = {});
+            }, fileTree);
+        });
+        let getFileTreeHTML = (obj, path = "") => {
+            let html = "";
+            for (let key in obj) {
+                if (typeof obj[key] === "string") {
+                    html += `<li id="${obj[key]}" class="file">
+                                <button style="float: right;" class="toggle off"><i class="fa-solid fa-eye"></i></button>
+                                <button style="float: right;" class="highlight off"><i class="fa-regular fa-lightbulb"></i></button>
+                                <i class="fa fa-code"></i> ${key}
+                            </li>`;
+                    continue;
+                }
+                let value = obj[key];
+                let dir = path + sep + key;
+                html += `<li id="${dir}"><button style="float: right;" class="toggle"><i class="fa-solid fa-eye"></i></button><i class="fa fa-folder-open"></i> ${key}`;
+                html += `${getFileTreeHTML(value, dir)}`;
+                html += "</li>";
+            }
+            return `<ul>${html}</ul>`;
+        };
+        this.DOM.settingsPanel.fileTree.innerHTML = getFileTreeHTML(fileTree, rootDir);
+        this.DOM.settingsPanel.fileTree.addEventListener("click", treeClickHandler);
+        let libs = this.data.filter((e) => e.data.library).reduce((obj, e) => {
+            if (!obj[e.data.parent]) {
+                obj[e.data.parent] = [];
+            }
+            obj[e.data.parent].push(e);
+            return obj;
         }, {});
-        let fileSelectHTML = Object.keys(fileSelect).sort()
-            .map((basepath) => {
-                let files = fileSelect[basepath].sort();
-                let html = `<optgroup label="${basepath}">`;
-                files.reverse().forEach((file) => {
-                    html += `<option value="${file.id}">${file.label}</option>`;
-                });
-                html += "</optgroup>";
-                return html;
-            })
-            .join("");
-        this.DOM.settingsPanel.fileSelect.innerHTML = fileSelectHTML;
-        this.DOM.settingsPanel.fileSelect.addEventListener("change", () => {
-            let file = this.DOM.settingsPanel.fileSelect.value;
-            this.selectedNodes.clear();
-            this.selectedNodes.add(file);
-            let node = this.cy.$id(file);
-            if (node.length) { this.setInfoPanel(node.data()); }
-            if (!this.isLocked) {
-                this.DOM.infoPanel.lockBtn.click();
+        let html = "";
+        let catLabels = { "external": "External Libraries", "internal": "Internal Modules", "unused": "Unused / Development", "deps": "Lower Level Dependencies" };
+        for (let cat of Object.keys(catLabels)) {
+            if (!libs[cat]) {
+                continue;
             }
-            this.highlightNodes();
-        });
+            html += `<div id="${cat}"><button style="float: right;" class="toggle"><i class="fa-solid fa-eye"></i></button><i class="fa-solid fa-align-justify"></i> ${catLabels[cat]} <ul>`;
+            for (let lib of libs[cat].sort()) {
+                html += `<li id="${lib.data.id}">
+                    <button style="float: right;" class="toggle off"><i class="fa-solid fa-eye"></i></button>
+                    <button style="float: right;" class="highlight off"><i class="fa-regular fa-lightbulb"></i></button>
+                    <i class="fa fa-book"></i> ${lib.data.label}
+                </li>`;
+            }
+            html += "</ul></div>";
+        }
+        this.DOM.settingsPanel.libTree.innerHTML = `${html}`;
+        this.DOM.settingsPanel.libTree.addEventListener("click", treeClickHandler);
 
-        let libSelectHTML = [...new Set(this.data.filter((e) => e.data.library).map((e) => `<option value="${e.data.id}">${e.data.label}</option>`))]
-            .sort()
-            .join("");
-        this.DOM.settingsPanel.libSelect.innerHTML = libSelectHTML;
-        this.DOM.settingsPanel.libSelect.addEventListener("input", () => {
-            let lib = this.DOM.settingsPanel.libSelect.value;
-            this.selectedNodes.clear();
-            this.selectedNodes.add(lib);
-            let node = this.cy.$id(lib);
-            if (node.length) { this.setInfoPanel(node.data()); }
-            if (!this.isLocked) {
-                this.DOM.infoPanel.lockBtn.click();
-            }
-            this.highlightNodes();
-        });
+        // let fileSelect = this.data.filter((e) => e.data.filePath).reduce((o, e) => {
+        //     let basepath = e.data.id.replace(e.data.label, "") || "(root)";
+        //     o[basepath] = o[basepath] || [];
+        //     o[basepath].push(e.data);
+        //     return o;
+        // }, {});
+        // let fileSelectHTML = Object.keys(fileSelect).sort()
+        //     .map((basepath) => {
+        //         let files = fileSelect[basepath].sort();
+        //         let html = `<optgroup label="${basepath}">`;
+        //         files.reverse().forEach((file) => {
+        //             html += `<option value="${file.id}">${file.label}</option>`;
+        //         });
+        //         html += "</optgroup>";
+        //         return html;
+        //     })
+        //     .join("");
+        // this.DOM.settingsPanel.fileSelect.innerHTML = fileSelectHTML;
+        // this.DOM.settingsPanel.fileSelect.addEventListener("change", () => {
+        //     let file = this.DOM.settingsPanel.fileSelect.value;
+        //     this.selectedNodes.clear();
+        //     this.selectedNodes.add(file);
+        //     let node = this.cy.$id(file);
+        //     if (node.length) { this.setInfoPanel(node.data()); }
+        //     if (!this.isLocked) {
+        //         this.DOM.infoPanel.lockBtn.click();
+        //     }
+        //     this.highlightNodes();
+        // });
+
+        // let libSelectHTML = [...new Set(this.data.filter((e) => e.data.library).map((e) => `<option value="${e.data.id}">${e.data.label}</option>`))]
+        //     .sort()
+        //     .join("");
+        // this.DOM.settingsPanel.libSelect.innerHTML = libSelectHTML;
+        // this.DOM.settingsPanel.libSelect.addEventListener("input", () => {
+        //     let lib = this.DOM.settingsPanel.libSelect.value;
+        //     this.selectedNodes.clear();
+        //     this.selectedNodes.add(lib);
+        //     let node = this.cy.$id(lib);
+        //     if (node.length) { this.setInfoPanel(node.data()); }
+        //     if (!this.isLocked) {
+        //         this.DOM.infoPanel.lockBtn.click();
+        //     }
+        //     this.highlightNodes();
+        // });
 
         this.makeCy(style, layouts);
     }

@@ -4,9 +4,34 @@ body {
     line-height: 1.5;
     color: #333;
 
-    background: url("luna.jpg") no-repeat center right fixed;
+    background: url("../img/luna.jpg") no-repeat center right fixed;
     background-color: black;
     background-size: auto 100%;
+}
+
+/* width */
+::-webkit-scrollbar {
+    width: 10px;
+}
+
+/* Track */
+::-webkit-scrollbar-track {
+    background: #222;
+}
+
+/* Handle */
+::-webkit-scrollbar-thumb {
+    background: #888;
+}
+
+/* Handle on hover */
+::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+a {
+    color: #999999;
+    text-decoration: none;
 }
 
 #cy {
@@ -19,17 +44,23 @@ body {
     z-index: 1;
 }
 
-#settings {
+#menu {
+    height: 91em;
     position: fixed;
-    top: 4em;
     width: 25em;
-    left: 0.5em;
     z-index: 1000;
+}
+
+#menu>* {
+    display: block;
+    position: relative;
+    width: 100%;
     background: black;
     border-radius: 1em;
     color: white;
     padding: 0.5em;
     border: 1px solid white;
+    margin: 0.5em;
 }
 
 #settings h3 {
@@ -49,19 +80,6 @@ body {
 #settings input[type=number] {
     width: -webkit-fill-available !important;
 } */
-
-#info {
-    position: fixed;
-    top: 23em;
-    width: 25em;
-    left: 0.5em;
-    z-index: 1000;
-    background: black;
-    border-radius: 1em;
-    color: white;
-    padding: 0.5em;
-    border: 1px solid white;
-}
 
 #spacing {
     width: 3em;
@@ -85,7 +103,6 @@ button {
 h1 {
     font-size: 1.5em;
     font-weight: normal;
-    margin: 0 0 .5em;
     color: white;
 }
 
@@ -151,4 +168,81 @@ pre {
 
 td {
     padding: 0.25em;
+}
+
+.file-tree ul {
+    padding-left: 5px;
+    list-style: none;
+    margin-top: 0;
+}
+
+.file-tree ul li {
+    position: relative;
+    padding-top: 5px;
+    padding-bottom: 5px;
+    padding-left: 15px;
+    -webkit-box-sizing: border-box;
+    -moz-box-sizing: border-box;
+    box-sizing: border-box;
+}
+
+.file-tree ul li:before {
+    position: absolute;
+    top: 15px;
+    left: 0;
+    width: 10px;
+    height: 1px;
+    margin: auto;
+    content: "";
+    background-color: #666;
+}
+
+.file-tree ul li:after {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 1px;
+    height: 100%;
+    content: "";
+    background-color: #666;
+}
+
+.file-tree ul li:last-child:after {
+    height: 15px;
+}
+
+.file-tree ul a {
+    cursor: pointer;
+}
+
+.file-tree ul a:hover {
+    text-decoration: none;
+}
+
+#settings>b {
+    padding-left: 0.5em;
+}
+
+#fileTree,
+#libTree {
+    padding-left: 0.5em;
+    max-height: 16em;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+#fileTree button,
+#libTree button {
+    padding: 0.3em;
+    border: none;
+}
+
+#libTree ul {
+    list-style: none;
+    padding-inline-start: 0;
+}
+
+#libTree li {
+    padding-bottom: 0.25em;
 }

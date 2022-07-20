@@ -18,6 +18,10 @@ const scan = require("scope-analyzer");
 
 const depsCache = {};
 
+function astNodeEquals(a, b) {
+    return ["type", "start", "end"].every((k) => a[k] === b[k]);
+}
+
 function findReferences(node) {
     if (!node) {
         if (debug) { console.log(new Error("No node")); }
@@ -33,7 +37,7 @@ function findReferences(node) {
         // console.log("NO BINDING", { node });
         return [];
     }
-    let notItself = (ref) => !["type", "start", "end"].every((k) => ref[k] === node[k]);
+    let notItself = (ref) => !astNodeEquals(ref, node);
     return binding.getReferences().filter(notItself);
 }
 
@@ -48,13 +52,20 @@ function discoverAPI(ast, parent, _api = {}) {
         // eslint-disable-next-line no-use-before-define
         let source = findCallSource(node);
         // eslint-disable-next-line no-nested-ternary
-        let sourceLabel = source.type === "Program" ? "(toplevel)" : (source.id ? source.id.name : "(anonymous)");
+        let sourceLabel = source.type === "Program" ? "(toplevel)" : (source.id ? source.id.name : (source.key ? source.key.name : "(anonymous)"));
         let sourceId = `${sourceLabel}-${source.start}-${source.end}`;
         api[name] = api[name] || {};
         api[name].name = name;
         api[name].sourceId = sourceId;
         api[name].nodes = (api[name].nodes || []).concat([node]);
+        // skip API discovery, if API was an object property (workaround for https://github.com/goto-bus-stop/scope-analyzer/issues/32)
+        if (node.parent.property && astNodeEquals(node.parent.property, node)) {
+            return;
+        }
         for (let ref of findReferences(node)) {
+            if (astNodeEquals(ref.parent, parent)) { // cycle?
+                continue;
+            }
             api[name].children = discoverAPI(ast, ref.parent, api[name].children);
         }
     };
@@ -114,8 +125,20 @@ function findCallSource(node) {
                 source = predecessor.parent.parent;
             } else if (predecessor.parent.type === "FunctionDeclaration") { // function with name
                 source = predecessor.parent;
+            } else if (predecessor.parent.type === "MethodDefinition") { // method
+                source = predecessor.parent;
             } else if (predecessor.parent.type === "FunctionExpression") { // nameless function
                 source = predecessor.parent;
+                if (predecessor.parent.parent.type === "MethodDefinition") { // method
+                    source = predecessor.parent.parent;
+                // } else if (predecessor.parent.parent.type === "CallExpression") {
+                //     source = findCallSource(predecessor.parent.parent);
+                }
+            } else if (predecessor.parent.type === "ArrowFunctionExpression") { // nameless arrow function
+                source = predecessor.parent;
+                // if (predecessor.parent.parent.type === "CallExpression") {
+                //     source = findCallSource(predecessor.parent.parent);
+                // }
             }
         }
         predecessor = predecessor.parent;
@@ -123,13 +146,48 @@ function findCallSource(node) {
     return source;
 }
 
+// @returns FunctionExpression|FunctionExpression|FunctionDeclaration
 function findCallDefinition(node) {
     if (node.callee.type === "FunctionExpression") {
+        if (node.callee.parent.type === "MethodDefinition") { // method
+            return node.callee.parent;
+        }
         return node.callee;
     }
-    for (let ref of findReferences(node.callee)) {
-        if (ref.parent.type === "FunctionDeclaration" || ref.parent.type === "VariableDeclarator") {
-            return ref.parent;
+    if (node.callee.type === "Identifier" || node.callee.type === "MemberExpression") {
+        let id = node.callee.type === "MemberExpression" ? node.callee.property : node.callee;
+        for (let ref of findReferences(id)) { // findReferences once again lacking...
+            if (ref.parent.type === "FunctionDeclaration" || ref.parent.type === "VariableDeclarator" || ref.parent.type === "MethodDefinition") {
+                return ref.parent;
+            }
+        }
+    }
+    if (node.callee.type === "MemberExpression" && node.callee.object.type === "ThisExpression") {
+        let classBody = null;
+        let predecessor = node.parent;
+        while (predecessor && !classBody) {
+            if (predecessor.type === "ClassBody") {
+                classBody = predecessor;
+                break;
+            }
+            predecessor = predecessor.parent;
+        }
+        if (classBody) {
+            for (let method of classBody.body) {
+                if (method.type !== "MethodDefinition") {
+                    continue;
+                }
+                if (method.key.name === node.callee.property.name) {
+                    return method;
+                }
+            }
+        }
+    }
+    if (node.arguments && node.arguments.length > 0) {
+        for (let arg of node.arguments) {
+            if (arg.type === "FunctionExpression") {
+                return arg;
+            }
         }
     }
     return null;
@@ -170,8 +228,8 @@ async function parseDependencies(dependencies, devDependencies = {}) {
     // eslint-disable-next-line prefer-object-spread
     let deps = Object.assign({}, dependencies, devDependencies);
 
-    // for (let dep in deps) {
-    await Promise.all(Object.keys(deps).map(async(dep) => {
+    for (let dep in deps) {
+    // await Promise.all(Object.keys(deps).map(async(dep) => {
         let version = deps[dep].replace(/^\^/, ""); // TODO: https://stackoverflow.com/a/64990875/4356020
         node_modules[dep] = {
             version,
@@ -180,8 +238,8 @@ async function parseDependencies(dependencies, devDependencies = {}) {
         if (Object.keys(node_modules[dep].dependencies).length === 0) {
             delete node_modules[dep].dependencies;
         }
-    }));
-    // }
+    // }));
+    }
 
     return node_modules;
 }
@@ -196,7 +254,8 @@ async function getNodeModules(useLocalDependencies, dependencies, devDependencie
         let execute = promisify(exec);
 
         let { stdout, stderr } = await execute("npm ls --all --json", { "cwd": srcPath }).catch((stderr) => ({ stderr }));
-        if (stderr) {
+        // if (stderr) { // This catches warnings too
+        if (!stdout) {
             throw new Error(stderr);
             // return parseDependencies(dependencies, devDependencies);
         }
@@ -251,22 +310,25 @@ function constructString(node) {
 
 async function renderOutput(outputPath, data) {
     let paths = {
-        "cy":            resolve(__dirname, "assets", "cytoscape.min.js"),
-        "cyCollapse":    resolve(__dirname, "assets", "cytoscape-expand-collapse.js"),
-        "elk":           resolve(__dirname, "assets", "elk.bundled.js"),
-        "cyElk":         resolve(__dirname, "assets", "cytoscape-elk.js"),
-        "cola":          resolve(__dirname, "assets", "cola.min.js"),
-        "cyCola":        resolve(__dirname, "assets", "cytoscape-cola.js"),
-        // "dagre":      resolve(__dirname, "assets", "dagre.js"),
-        // "cyDagre":    resolve(__dirname, "assets", "cytoscape-dagre.js"),
-        "shim":          resolve(__dirname, "assets", "shim.min.js"),
-        "layoutBase":    resolve(__dirname, "assets", "layout-base.js"),
-        "coseBase":      resolve(__dirname, "assets", "cose-base.js"),
-        "cyCoseBilkent": resolve(__dirname, "assets", "cytoscape-cose-bilkent.js"),
-        "cySetup":       resolve(__dirname, "assets", "cytoscape-setup.js"),
-        "css":           resolve(__dirname, "assets", "stylesheet.css"),
-        "template":      resolve(__dirname, "assets", "template.ejs"),
-        "loader":        resolve(__dirname, "assets", "loader.svg"),
+        "cy":            resolve(__dirname, "assets", "js", "cytoscape.min.js"),
+        "cyCollapse":    resolve(__dirname, "assets", "js", "cytoscape-expand-collapse.js"),
+        "elk":           resolve(__dirname, "assets", "js", "elk.bundled.js"),
+        "cyElk":         resolve(__dirname, "assets", "js", "cytoscape-elk.js"),
+        "cola":          resolve(__dirname, "assets", "js", "cola.min.js"),
+        "cyCola":        resolve(__dirname, "assets", "js", "cytoscape-cola.js"),
+        // "dagre":      resolve(__dirname, "assets", "js", "dagre.js"),
+        // "cyDagre":    resolve(__dirname, "assets", "js", "cytoscape-dagre.js"),
+        "shim":          resolve(__dirname, "assets", "js", "shim.min.js"),
+        "layoutBase":    resolve(__dirname, "assets", "js", "layout-base.js"),
+        "coseBase":      resolve(__dirname, "assets", "js", "cose-base.js"),
+        "cyCoseBilkent": resolve(__dirname, "assets", "js", "cytoscape-cose-bilkent.js"),
+        "cySetup":       resolve(__dirname, "assets", "js", "cytoscape-setup.js"),
+        "stylesheet":    resolve(__dirname, "assets", "css", "stylesheet.css"),
+        "fontawesome":   resolve(__dirname, "assets", "css", "fontawesome.min.css"),
+        "regularFont":   resolve(__dirname, "assets", "css", "regular.min.css"),
+        "solidFont":     resolve(__dirname, "assets", "css", "solid.min.css"),
+        "template":      resolve(__dirname, "assets", "html", "template.ejs"),
+        "loader":        resolve(__dirname, "assets", "img", "loader.svg"),
         "output":        resolve(outputPath),
     };
     let title = `${data.name || paths.output}${data.version ? `@${data.version}` : ""}`;
@@ -289,7 +351,7 @@ async function renderOutput(outputPath, data) {
     let calls = {};
 
     for (const file of srcFiles) {
-        if (debug && file.includes("assets")) {
+        if (debug && file.includes("assets") && !file.includes("setup.js")) {
             continue;
         }
         try {
@@ -313,9 +375,10 @@ async function renderOutput(outputPath, data) {
                 }
                 // let parentPath = dirname(file);
                 // eslint-disable-next-line no-nested-ternary
-                let sourceLabel = source.type === "Program" ? "(toplevel)" : (source.id ? source.id.name : "(anonymous)");
+                let sourceLabel = source.type === "Program" ? "(toplevel)" : (source.id ? source.id.name : (source.key ? source.key.name : "(anonymous)"));
                 let sourceId = `${sourceLabel}-${source.start}-${source.end}`;
-                let targetLabel = target.id ? target.id.name : "(anonymous)";
+                // eslint-disable-next-line no-nested-ternary
+                let targetLabel = target.id ? target.id.name : (target.key ? target.key.name : "(anonymous)");
                 let targetId = `${targetLabel}-${target.start}-${target.end}`;
                 let edgeId = `${relative(srcPath, file)} | ${sourceId} -> ${targetId}`;
 
@@ -333,7 +396,7 @@ async function renderOutput(outputPath, data) {
                         "color":  "#fff",
                         "id":     sourceId,
                         "parent": relative(srcPath, file), // TODO: parent
-                        "type":   "Function call",
+                        "type":   source.type === "ClassDeclaration" ? "Class" : "Function call",
                     },
                 };
                 // node (target)
@@ -392,6 +455,14 @@ async function renderOutput(outputPath, data) {
                         // }
                         saveLib(libName, parent);
                     }
+                } else if (node.type === "ClassDeclaration") {
+                    for (let method of node.body.body) {
+                        if (method.type === "MethodDefinition") {
+                            saveCall(node, method, method);
+                        }
+                    }
+                    // let source = findCallSource(node);
+                    // saveCall(source, node, node);
                 }
             });
             libs[file] = libsInFile;

@@ -16,15 +16,24 @@
         <script src="<%= paths.layoutBase %>"></script>
         <script src="<%= paths.coseBase %>"></script>
         <script src="<%= paths.cyCoseBilkent %>"></script>
-        <link rel="stylesheet" href="<%= paths.css %>">
+        <link rel="stylesheet" href="<%= paths.stylesheet %>">
+        <link rel="stylesheet" href="<%= paths.fontawesome %>">
+        <link rel="stylesheet" href="<%= paths.regularFont %>">
+        <link rel="stylesheet" href="<%= paths.solidFont %>">
     </head>
 
     <body>
-        <header>
-            <h1>[LUNA] <%= title %>
-            </h1>
+        <img id="loader" src="<%= paths.loader %>"></img>
+        <div id="menu">
+            <div id="title">
+                <center>
+                    <h1>
+                        <i class="fa-solid fa-moon"></i> <b>LUNA</b> | <%= title %>
+                    </h1>
+                </center>
+            </div>
             <div id="settings">
-                <h3>Graph</h3>
+                <h3><i class="fa-solid fa-circle-nodes"></i> Graph</h3>
                 <table>
                     <tr>
                         <td><b><label for="bShowData">Show Data Imports:</label></b></td>
@@ -45,43 +54,47 @@
                                 <option value="mrtree">Elk: Mr. Tree</option>
                             </select>
                     </tr>
-                    <tr>
+                    <!-- <tr>
                         <td><b>Highlight File:</b></td>
                         <td>
-                            <select id="fileSelect">
-                            </select>
+                            <select id="fileSelect"></select>
+                        </td>
                     </tr>
                     <tr>
                         <td><b>Highlight Library:</b></td>
                         <td>
-                            <select id="libSelect">
-                            </select>
-                    </tr>
+                            <select id="libSelect"></select>
+                        </td>
+                    </tr> -->
                 </table>
                 <br>
+                <b>File Control:</b>
+                <div class="file-tree" id="fileTree"></div>
+                <br>
+                <b>Library Control:</b>
+                <div class="file-tree" id="libTree"></div>
+                <br>
                 <center>
-                    <button id="imgBtn">&#x25EA;</button>
+                    <button id="imgBtn"><i class="fa-solid fa-image"></i></button>
                     <button id="fitBtn">Fit</button>
                     <button id="resetBtn">Center</button>
                     <button id="backBtn" style="display: none;">Back</button>
                 </center>
             </div>
             <div id="info" style="display: none;">
-                <h3>Node</h3>
+                <h3><i class="fa-solid fa-circle"></i> Node</h3>
                 <div id="info-content"></div>
                 <center>
-                    <button id="lockBtn"
-                        title="Lock focus on this node. Shortcut: Shift + click">&#128275;&#xFE0E;</button>
+                    <button id="lockBtn" title="Lock focus on this node. Shortcut: Shift + click"><i
+                            class="fa-solid fa-lock"></i></button>
                     <button id="centerBtn">Center</button>
                     <button id="highlightBtn">Highlight</button>
                 </center>
-        </header>
-        <main>
-            <img id="loader" src="<%= paths.loader %>"></img>
-            <div id="cy" data-cy="<%= JSON.stringify(data) %>"></div>
-            <script>window.data = JSON.parse(document.querySelector("#cy").dataset.cy);</script>
-            <script src="<%= paths.cySetup %>"></script>
-        </main>
+            </div>
+        </div>
+        <div id="cy" data-cy="<%= JSON.stringify(data) %>"></div>
+        <script>window.data = JSON.parse(document.querySelector("#cy").dataset.cy);</script>
+        <script src="<%= paths.cySetup %>"></script>
     </body>
 
 </html>
