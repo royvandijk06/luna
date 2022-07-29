@@ -6,24 +6,26 @@
         <title>
             <%= title %>
         </title>
-        <script src="<%= paths.cy %>"></script>
-        <script src="<%= paths.cyCollapse %>"></script>
-        <script src="<%= paths.elk %>"></script>
-        <script src="<%= paths.cyElk %>"></script>
-        <script src="<%= paths.cola %>"></script>
-        <script src="<%= paths.cyCola %>"></script>
-        <script src="<%= paths.shim %>"></script>
-        <script src="<%= paths.layoutBase %>"></script>
-        <script src="<%= paths.coseBase %>"></script>
-        <script src="<%= paths.cyCoseBilkent %>"></script>
-        <link rel="stylesheet" href="<%= paths.stylesheet %>">
-        <link rel="stylesheet" href="<%= paths.fontawesome %>">
-        <link rel="stylesheet" href="<%= paths.regularFont %>">
-        <link rel="stylesheet" href="<%= paths.solidFont %>">
+        
+        <script><%- include(paths.cy); -%></script>
+        <script><%- include(paths.cyCollapse); -%></script>
+        <script><%- include(paths.elk); -%></script>
+        <script><%- include(paths.cyElk); -%></script>
+        <script><%- include(paths.cola); -%></script>
+        <script><%- include(paths.cyCola); -%></script>
+        <script><%- include(paths.shim); -%></script>
+        <script><%- include(paths.layoutBase); -%></script>
+        <script><%- include(paths.coseBase); -%></script>
+        <script><%- include(paths.cyCoseBilkent); -%></script>
+
+        <style><%- include(paths.stylesheet); -%></style>
+        <style><%- include(paths.fontawesome); -%></style>
+        <style><%- include(paths.regularFont); -%></style>
+        <style><%- include(paths.solidFont); -%></style>
     </head>
 
     <body>
-        <img id="loader" src="<%= paths.loader %>"></img>
+        <img id="loader" src="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4KPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOnhsaW5rPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hsaW5rIiBzdHlsZT0ibWFyZ2luOiBhdXRvOyBiYWNrZ3JvdW5kOiBub25lOyBkaXNwbGF5OiBibG9jazsgc2hhcGUtcmVuZGVyaW5nOiBhdXRvOyIgd2lkdGg9IjYwMHB4IiBoZWlnaHQ9IjYwMHB4IiB2aWV3Qm94PSIwIDAgMTAwIDEwMCIgcHJlc2VydmVBc3BlY3RSYXRpbz0ieE1pZFlNaWQiPgo8cGF0aCBkPSJNMjUgNTBBMjUgMjUgMCAwIDAgNzUgNTBBMjUgMjYuNSAwIDAgMSAyNSA1MCIgZmlsbD0iI2ZmZmZmZiIgc3Ryb2tlPSJub25lIj4KICA8YW5pbWF0ZVRyYW5zZm9ybSBhdHRyaWJ1dGVOYW1lPSJ0cmFuc2Zvcm0iIHR5cGU9InJvdGF0ZSIgZHVyPSIxLjE3NjQ3MDU4ODIzNTI5NDJzIiByZXBlYXRDb3VudD0iaW5kZWZpbml0ZSIga2V5VGltZXM9IjA7MSIgdmFsdWVzPSIwIDUwIDUwLjc1OzM2MCA1MCA1MC43NSI+PC9hbmltYXRlVHJhbnNmb3JtPgo8L3BhdGg+CjwhLS0gW2xkaW9dIGdlbmVyYXRlZCBieSBodHRwczovL2xvYWRpbmcuaW8vIC0tPjwvc3ZnPg=="></img>
         <div id="menu">
             <div id="title">
                 <center>

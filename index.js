@@ -328,11 +328,10 @@ async function renderOutput(outputPath, data) {
         "regularFont":   resolve(__dirname, "assets", "css", "regular.min.css"),
         "solidFont":     resolve(__dirname, "assets", "css", "solid.min.css"),
         "template":      resolve(__dirname, "assets", "html", "template.ejs"),
-        "loader":        resolve(__dirname, "assets", "img", "loader.svg"),
         "output":        resolve(outputPath),
     };
     let title = `${data.name || paths.output}${data.version ? `@${data.version}` : ""}`;
-    let html = await ejs.renderFile(paths.template, { title, paths, "data": data.data });
+    let html = await ejs.renderFile(paths.template, { title, paths, "data": data.data }, { "rmWhitespace": true });
     return writeFile(resolve(outputPath, "./luna.html"), html);
 }
 
@@ -481,7 +480,7 @@ async function renderOutput(outputPath, data) {
     let treeData = [
         { "data": { "label": "Source Code", "color": "#fff", "id": "files", "group": true } },
         { "data": { "label": "Libraries", "color": "#fff", "id": "libs", "group": true } },
-        { "data": { "label": "Unused", "color": "#fff", "parent": "libs", "id": "unused", "group": true } },
+        { "data": { "label": "Development", "color": "#fff", "parent": "libs", "id": "unused", "group": true } },
         { "data": { "label": "Internal", "color": "#fff", "parent": "libs", "id": "internal", "group": true } },
         { "data": { "label": "External", "color": "#fff", "parent": "libs", "id": "external", "group": true } },
         { "data": { "label": "Dependency Tree", "color": "#fff", "id": "deps", "group": true } },

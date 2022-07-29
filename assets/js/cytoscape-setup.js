@@ -124,9 +124,49 @@ class LUNA {
         let layout = layouts.layered;
         this.DOM.settingsPanel.layout.value = "layered";
         layout.fit = true;
+
+        let elements = [];
+        let hiddenElements = [];
+        let hiddenNodeIds = {};
+        for (let element of this.data) {
+            if (element.source && element.target) {
+                continue;
+            }
+            if (element.data.parent === "deps" || element.data.type === "API" || element.data.caller) {
+                hiddenElements.push(element);
+                hiddenNodeIds[element.data.id] = element.data.parent;
+            } else {
+                elements.push(element);
+            }
+        }
+        let tmpElements = elements;
+        elements = [];
+        for (let element of tmpElements) {
+            if (hiddenNodeIds[element.data.source] || hiddenNodeIds[element.data.target]) {
+                // if edge is between hidden nodes, hide it
+                if (hiddenNodeIds[element.data.source] && hiddenNodeIds[element.data.target] && hiddenNodeIds[element.data.source] === hiddenNodeIds[element.data.target]) {
+                    hiddenElements.push(element);
+                } else {
+                    elements.push(element);
+                    // unhide attached nodes
+                    hiddenElements = hiddenElements.filter((e) => {
+                        if (e.data.id !== element.data.source && e.data.id !== element.data.target) {
+                            return true;
+                        }
+                        elements.push(e);
+                        return false;
+                    });
+                    // hiddenNodeIds = hiddenNodeIds.filter((id) => id !== element.data.source && id !== element.data.target);
+                }
+            } else {
+                elements.push(element);
+            }
+        }
+
         this.cy = cytoscape({
             "container":           document.getElementById("cy"),
-            "elements":            this.data,
+            // "elements":            this.data,
+            elements,
             style,
             layout,
             "wheelSensitivity":    0.1,
@@ -154,7 +194,7 @@ class LUNA {
                 "animate":                        false,
                 "animationDuration":              1500,
                 "undoable":                       false,
-                "cueEnabled":                     true,
+                "cueEnabled":                     false,
                 "expandCollapseCuePosition":      "top-left",
                 "expandCollapseCueSize":          12,
                 "expandCollapseCueLineSize":      8,
@@ -199,7 +239,51 @@ class LUNA {
         });
 
         let lastEvt = null;
-        this.cy.nodes().on("click", (evt) => {
+        this.cy.nodes().on("dblclick", (evt) => {
+            // prevent duplicate event firing
+            if (lastEvt && lastEvt.timeStamp === evt.timeStamp && lastEvt.position.x === evt.position.x && lastEvt.position.y === evt.position.y) {
+                return;
+            }
+            lastEvt = evt;
+            let node = evt.target;
+            let nodesToAdd = [];
+            let nodesToAddIDs = [];
+            let remainingHiddenElements = [];
+            for (let element of hiddenElements) {
+                if (element.data.parent === node.id()) {
+                    nodesToAdd.push(element);
+                    nodesToAddIDs.push(element.data.id);
+                } else {
+                    remainingHiddenElements.push(element);
+                }
+            }
+            hiddenElements = remainingHiddenElements;
+            remainingHiddenElements = [];
+            for (let element of hiddenElements) {
+                if (nodesToAddIDs.includes(element.data.source) || nodesToAddIDs.includes(element.data.target)) {
+                    nodesToAdd.push(element);
+                } else {
+                    remainingHiddenElements.push(element);
+                }
+            }
+            hiddenElements = remainingHiddenElements;
+            let api = this.cy.expandCollapse("get");
+            if (nodesToAdd.length === 0) {
+                if (!api.isExpandable(node) && !api.isCollapsible(node)) {
+                    this.DOM.infoPanel.content.innerHTML = "<br><br><center><h2><i class=\"fa-solid fa-triangle-exclamation\"></i> This node is not expandable or collapsable!</h2></center></br></br>";
+                    return;
+                }
+                if (api.isExpandable(node)) {
+                    api.expand(node);
+                } else {
+                    api.collapse(node);
+                }
+            } else {
+                api.expand(node);
+                this.cy.add(nodesToAdd);
+            }
+        });
+        this.cy.nodes().on("oneclick", (evt) => {
             // prevent duplicate event firing
             if (lastEvt && lastEvt.timeStamp === evt.timeStamp && lastEvt.position.x === evt.position.x && lastEvt.position.y === evt.position.y) {
                 return;
@@ -689,52 +773,60 @@ class LUNA {
                 return;
             }
 
-            if (btn.classList.contains("toggle")) {
+            let ids = [];
+            if (btn.dataset.ids) {
+                ids = btn.dataset.ids.split(",");
+            } else {
                 let { id } = btn.parentNode;
-                if (btn.classList.contains("on")) { // hidden
-                    btn.classList.remove("on");
-                    btn.classList.add("off");
-                    let nodes = this.trashBin[id];
-                    this.cy.add(nodes);
-                    delete this.trashBin[id];
-                    let i = btn.querySelector("i");
-                    i.classList.remove("fa-eye-slash");
-                    i.classList.add("fa-eye");
-                } else { // visible
-                    btn.classList.remove("off");
-                    btn.classList.add("on");
-                    let nodes = this.cy.$id(id).remove();
-                    this.trashBin[id] = nodes;
-                    let i = btn.querySelector("i");
-                    i.classList.remove("fa-eye");
-                    i.classList.add("fa-eye-slash");
+                ids.push(id);
+            }
+
+            for (let id of ids) {
+                if (btn.classList.contains("toggle")) {
+                    if (btn.classList.contains("on")) { // hidden
+                        btn.classList.remove("on");
+                        btn.classList.add("off");
+                        let nodes = this.trashBin[id];
+                        this.cy.add(nodes);
+                        delete this.trashBin[id];
+                        let i = btn.querySelector("i");
+                        i.classList.remove("fa-eye-slash");
+                        i.classList.add("fa-eye");
+                    } else { // visible
+                        btn.classList.remove("off");
+                        btn.classList.add("on");
+                        let nodes = this.cy.$id(id).remove();
+                        this.trashBin[id] = nodes;
+                        let i = btn.querySelector("i");
+                        i.classList.remove("fa-eye");
+                        i.classList.add("fa-eye-slash");
+                    }
+                } else if (btn.classList.contains("highlight")) {
+                    if (btn.classList.contains("on")) { // highlighted
+                        btn.classList.remove("on");
+                        btn.classList.add("off");
+                        this.selectedNodes.delete(id);
+                        let i = btn.querySelector("i");
+                        i.classList.remove("fa-solid");
+                        i.classList.add("fa-regular");
+                    } else {
+                        btn.classList.remove("off");
+                        btn.classList.add("on");
+                        this.selectedNodes.add(id);
+                        let i = btn.querySelector("i");
+                        i.classList.remove("fa-regular");
+                        i.classList.add("fa-solid");
+                    }
+                    let node = this.cy.$id(id);
+                    if (node.length) { this.setInfoPanel(node.data()); }
+                    if (!this.isLocked) {
+                        this.DOM.infoPanel.lockBtn.click();
+                    }
+                    if (this.selectedNodes.size === 0) {
+                        this.DOM.infoPanel.lockBtn.click();
+                    }
+                    this.highlightNodes();
                 }
-            } else if (btn.classList.contains("highlight")) {
-                let { id } = btn.parentNode;
-                if (btn.classList.contains("on")) { // highlighted
-                    btn.classList.remove("on");
-                    btn.classList.add("off");
-                    this.selectedNodes.delete(id);
-                    let i = btn.querySelector("i");
-                    i.classList.remove("fa-solid");
-                    i.classList.add("fa-regular");
-                } else {
-                    btn.classList.remove("off");
-                    btn.classList.add("on");
-                    this.selectedNodes.add(id);
-                    let i = btn.querySelector("i");
-                    i.classList.remove("fa-regular");
-                    i.classList.add("fa-solid");
-                }
-                // let node = this.cy.$id(id);
-                // if (node.length) { this.setInfoPanel(node.data()); }
-                if (!this.isLocked) {
-                    this.DOM.infoPanel.lockBtn.click();
-                }
-                if (this.selectedNodes.size === 0) {
-                    this.DOM.infoPanel.lockBtn.click();
-                }
-                this.highlightNodes();
             }
         };
 
@@ -774,7 +866,6 @@ class LUNA {
             return `<ul>${html}</ul>`;
         };
         this.DOM.settingsPanel.fileTree.innerHTML = getFileTreeHTML(fileTree, rootDir);
-        this.DOM.settingsPanel.fileTree.addEventListener("click", treeClickHandler);
         let libs = this.data.filter((e) => e.data.library).reduce((obj, e) => {
             if (!obj[e.data.parent]) {
                 obj[e.data.parent] = [];
@@ -799,7 +890,9 @@ class LUNA {
             html += "</ul></div>";
         }
         this.DOM.settingsPanel.libTree.innerHTML = `${html}`;
-        this.DOM.settingsPanel.libTree.addEventListener("click", treeClickHandler);
+        // this.DOM.settingsPanel.fileTree.insertAdjacentHTML("beforebegin", "<button data-ids=\"files\" class=\"toggle on\"><i class=\"fa-solid fa-eye\"></i></button>");
+        // this.DOM.settingsPanel.libTree.insertAdjacentHTML("beforebegin", "<button data-ids=\"libs,deps\" class=\"toggle on\"><i class=\"fa-solid fa-eye\"></i></button>");
+        this.DOM.settingsPanel.container.addEventListener("click", treeClickHandler);
 
         // let fileSelect = this.data.filter((e) => e.data.filePath).reduce((o, e) => {
         //     let basepath = e.data.id.replace(e.data.label, "") || "(root)";
