@@ -143,6 +143,7 @@ class LUNA {
         elements = [];
         for (let element of tmpElements) {
             if (hiddenNodeIds[element.data.source] || hiddenNodeIds[element.data.target]) {
+            // if (element.data.source && element.data.target) {
                 // if edge is between hidden nodes, hide it
                 if (hiddenNodeIds[element.data.source] && hiddenNodeIds[element.data.target] && hiddenNodeIds[element.data.source] === hiddenNodeIds[element.data.target]) {
                     hiddenElements.push(element);

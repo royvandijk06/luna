@@ -1,72 +1,82 @@
-#!/usr/bin/env node
+// #!/usr/bin/env node
 
 const srcPath = process.argv[2] || process.cwd() || __dirname;
 const debug = true;
 if (debug) { console.log({ srcPath }); }
 
-const { basename, resolve, relative, dirname, extname } = require("path");
+const { analyze } = require("eslint-scope");
+const { basename, dirname, extname, relative, resolve } = require("path");
 const { exec } = require("child_process");
+const { latestEcmaVersion, parse } = require("espree");
 const { promisify } = require("util");
 const { readFile, writeFile, stat } = require("fs/promises");
-const AST = require("acorn-loose");
-const astWalk = require("acorn-walk").fullAncestor;
+const { Syntax, traverse } = require("estraverse");
 const ejs = require("ejs");
 const fetch = require("node-fetch");
 const glob = require("glob");
 const randomColor = require("randomcolor");
-const scan = require("scope-analyzer");
 
-const depsCache = {};
+let depsCache = {};
 
 function astNodeEquals(a, b) {
-    return ["type", "start", "end"].every((k) => a[k] === b[k]);
+    return a.type === b.type && a.range[0] === b.range[0] && a.range[1] === b.range[1];
 }
 
-function findReferences(node) {
-    if (!node) {
-        if (debug) { console.log(new Error("No node")); }
-        return [];
-    }
-    if (node.type !== "Identifier") {
-        // if (debug) { console.log(new Error("Not an identifier"), node); }
-        return [];
-    }
-    // console.log({ node });
-    let binding = scan.getBinding(node);
-    if (!binding) {
-        // console.log("NO BINDING", { node });
-        return [];
-    }
-    let notItself = (ref) => !astNodeEquals(ref, node);
-    return binding.getReferences().filter(notItself);
-}
+// function findReferences(node) {
+//     if (!node) {
+//         if (debug) { console.log(new Error("No node")); }
+//         return [];
+//     }
+//     if (node.type !== "Identifier") {
+//         // if (debug) { console.log(new Error("Not an identifier"), node); }
+//         return [];
+//     }
+//     // console.log({ node });
+//     let binding = scan.getBinding(node);
+//     if (!binding) {
+//         // console.log("NO BINDING", { node });
+//         return [];
+//     }
+//     let notItself = (ref) => !astNodeEquals(ref, node);
+//     return binding.getReferences().filter(notItself);
+// }
 
 /* Possibilities:
  * 1. Library is loaded into a single variable => variable = library name
  * 2. Library is loaded destructively into multiple objects => require(...) = library name
  * 3. After library is loaded, it gets instantiated
  */
-function discoverAPI(ast, parent, _api = {}) {
+function discoverAPI(currentScope, parent, _api = {}) {
+    // return {};
     let api = _api;
     let addToAPI = (name, node) => {
         // eslint-disable-next-line no-use-before-define
-        let source = findCallSource(node);
+        let source = findCallSource(node, currentScope);
         // eslint-disable-next-line no-nested-ternary
-        let sourceLabel = source.type === "Program" ? "(toplevel)" : (source.id ? source.id.name : (source.key ? source.key.name : "(anonymous)"));
+        let sourceLabel = source.type === Syntax.Program ? "(toplevel)" : (source.id ? source.id.name : (source.key ? source.key.name : "(anonymous)"));
         let sourceId = `${sourceLabel}-${source.start}-${source.end}`;
         api[name] = api[name] || {};
         api[name].name = name;
         api[name].sourceId = sourceId;
         api[name].nodes = (api[name].nodes || []).concat([node]);
-        // skip API discovery, if API was an object property (workaround for https://github.com/goto-bus-stop/scope-analyzer/issues/32)
-        if (node.parent.property && astNodeEquals(node.parent.property, node)) {
-            return;
-        }
-        for (let ref of findReferences(node)) {
-            if (astNodeEquals(ref.parent, parent)) { // cycle?
-                continue;
+        // // skip API discovery, if API was an object property (workaround for https://github.com/goto-bus-stop/scope-analyzer/issues/32)
+        // if (node.parent.property && astNodeEquals(node.parent.property, node)) {
+        //     return;
+        // }
+        // eslint-disable-next-line no-use-before-define
+        let variable = findCorrespondingVariable(node, currentScope);
+        if (variable) {
+            for (let r of variable.references) {
+                let ref = r.identifier;
+                console.log(ref.parent);
+                process.exit();
+                if (astNodeEquals(ref.parent, parent)) { // cycle?
+                    continue;
+                }
+                api[name].children = discoverAPI(currentScope, ref.parent, api[name].children);
             }
-            api[name].children = discoverAPI(ast, ref.parent, api[name].children);
+        } else if (debug) {
+            console.warn("Could not find corresponding variable for", node);
         }
     };
 
@@ -83,20 +93,27 @@ function discoverAPI(ast, parent, _api = {}) {
         }
     } else if (parent.id) { // variable name
         let added = false;
-        for (let ref of findReferences(parent.id)) {
-            if (ref.parent.type === "CallExpression" && !added) { // lib variable is a function
-                addToAPI(`(reference)\nas "${parent.id.name}"`, parent.id);
-                added = true;
+        // eslint-disable-next-line no-use-before-define
+        let variable = findCorrespondingVariable(parent.id, currentScope);
+        if (variable) {
+            for (let r of variable.references) {
+                let ref = r.identifier;
+                if (ref.parent.type === Syntax.CallExpression && !added) { // lib variable is a function
+                    addToAPI(`(reference)\nas "${parent.id.name}"`, parent.id);
+                    added = true;
+                }
+                api = discoverAPI(currentScope, ref.parent, api);
             }
-            api = discoverAPI(ast, ref.parent, api);
+        } else if (debug) {
+            console.warn("Could not find corresponding variable for", parent.id);
         }
-    } else if (parent.type === "NewExpression") { // new instance of library
+    } else if (parent.type === Syntax.NewExpression) { // new instance of library
         if (parent.parent.id) { // instance assigned to a variable
             addToAPI("(instance)", parent.parent.id);
         } else if (parent.parent.left && parent.parent.left.property && !parent.parent.left.computed) { // instance assigned to a property
             addToAPI("(instance)", parent.parent.left.property);
         }
-    } else {
+    } else if (debug) {
         // console.log("CANNOT FIND API", { parent });
     }
     return api;
@@ -106,7 +123,7 @@ function discoverAPI(ast, parent, _api = {}) {
 //     let source = null;
 //     let predecessor = node.parent;
 //     while (!source && predecessor) {
-//         if (predecessor.type === "FunctionDeclaration" || predecessor.type === "VariableDeclarator" || predecessor.type === "Program") {
+//         if (predecessor.type === Syntax.FunctionDeclaration || predecessor.type === Syntax.VariableDeclarator || predecessor.type === Syntax.Program) {
 //             source = predecessor;
 //         }
 //         predecessor = predecessor.parent;
@@ -114,59 +131,90 @@ function discoverAPI(ast, parent, _api = {}) {
 //     return source;
 // }
 
-function findCallSource(node) {
-    let source = null;
-    let predecessor = node.parent;
-    while (!source && predecessor) {
-        if (predecessor.type === "Program") {
-            source = predecessor;
-        } else if (predecessor.type === "BlockStatement") {
-            if (predecessor.parent.parent.type === "VariableDeclarator") { // function assigned to a variable
-                source = predecessor.parent.parent;
-            } else if (predecessor.parent.type === "FunctionDeclaration") { // function with name
-                source = predecessor.parent;
-            } else if (predecessor.parent.type === "MethodDefinition") { // method
-                source = predecessor.parent;
-            } else if (predecessor.parent.type === "FunctionExpression") { // nameless function
-                source = predecessor.parent;
-                if (predecessor.parent.parent.type === "MethodDefinition") { // method
-                    source = predecessor.parent.parent;
-                // } else if (predecessor.parent.parent.type === "CallExpression") {
-                //     source = findCallSource(predecessor.parent.parent);
-                }
-            } else if (predecessor.parent.type === "ArrowFunctionExpression") { // nameless arrow function
-                source = predecessor.parent;
-                // if (predecessor.parent.parent.type === "CallExpression") {
-                //     source = findCallSource(predecessor.parent.parent);
-                // }
-            }
-        }
-        predecessor = predecessor.parent;
+function findCallSource(node, currentScope) {
+    // let source = null;
+    // let predecessor = node.parent;
+    // while (!source && predecessor) {
+    //     if (predecessor.type === Syntax.Program) {
+    //         source = predecessor;
+    //     } else if (predecessor.type === Syntax.BlockStatement) {
+    //         if (predecessor.parent.parent.type === Syntax.VariableDeclarator) { // function assigned to a variable
+    //             source = predecessor.parent.parent;
+    //         } else if (predecessor.parent.type === Syntax.FunctionDeclaration) { // function with name
+    //             source = predecessor.parent;
+    //         } else if (predecessor.parent.type === Syntax.MethodDefinition) { // method
+    //             source = predecessor.parent;
+    //         } else if (predecessor.parent.type === Syntax.FunctionExpression) { // nameless function
+    //             source = predecessor.parent;
+    //             if (predecessor.parent.parent.type === Syntax.MethodDefinition) { // method
+    //                 source = predecessor.parent.parent;
+    //             // } else if (predecessor.parent.parent.type === Syntax.CallExpression) {
+    //             //     source = findCallSource(predecessor.parent.parent);
+    //             }
+    //         } else if (predecessor.parent.type === Syntax.ArrowFunctionExpression) { // nameless arrow function
+    //             source = predecessor.parent;
+    //             // if (predecessor.parent.parent.type === Syntax.CallExpression) {
+    //             //     source = findCallSource(predecessor.parent.parent);
+    //             // }
+    //         }
+    //     }
+    //     predecessor = predecessor.parent;
+    // }
+    // return source;
+
+    let betterScope = currentScope;
+    while (!betterScope.type.toLowerCase().includes("function") && !betterScope.type.toLowerCase().includes("module") && betterScope.upper) {
+        betterScope = betterScope.upper;
     }
-    return source;
+    return betterScope.block;
 }
 
-// @returns FunctionExpression|FunctionExpression|FunctionDeclaration
-function findCallDefinition(node) {
-    if (node.callee.type === "FunctionExpression") {
-        if (node.callee.parent.type === "MethodDefinition") { // method
-            return node.callee.parent;
+function findCorrespondingVariable(node, scope) {
+    // return scopeManager.getDeclaredVariables(node)
+
+    for (let ref of scope.variables.concat(scope.through)) {
+        let variable = ref.resolved || ref;
+        for (let id of variable.identifiers || []) {
+            if (astNodeEquals(id, node)) {
+                return variable;
+            }
         }
-        return node.callee;
-    }
-    if (node.callee.type === "Identifier" || node.callee.type === "MemberExpression") {
-        let id = node.callee.type === "MemberExpression" ? node.callee.property : node.callee;
-        for (let ref of findReferences(id)) { // findReferences once again lacking...
-            if (ref.parent.type === "FunctionDeclaration" || ref.parent.type === "VariableDeclarator" || ref.parent.type === "MethodDefinition") {
-                return ref.parent;
+        for (let ref of variable.references || []) {
+            if (astNodeEquals(ref.identifier, node)) {
+                return variable;
             }
         }
     }
-    if (node.callee.type === "MemberExpression" && node.callee.object.type === "ThisExpression") {
+    return null;
+}
+
+// @returns FunctionExpression|FunctionDeclaration
+function findCallDefinition(node, currentScope) {
+    // if (node.callee.type === Syntax.FunctionExpression) {
+    //     if (node.callee.parent.type === Syntax.MethodDefinition) { // method
+    //         return node.callee.parent;
+    //     }
+    //     return node.callee;
+    // }
+
+    // if (node.callee.type === Syntax.Identifier || node.callee.type === Syntax.MemberExpression) {
+    //     let id = node.callee.type === Syntax.MemberExpression ? node.callee.property : node.callee;
+    //     let variable = findCorrespondingVariable(id, currentScope);
+    //     if (variable) {
+    //         for (let r of variable.references) { // findReferences once again lacking...
+    //             let ref = r.identifier;
+    //             if (ref.parent.type === Syntax.FunctionDeclaration || ref.parent.type === Syntax.VariableDeclarator || ref.parent.type === Syntax.MethodDefinition) {
+    //                 return ref.parent;
+    //             }
+    //         }
+    //     }
+    // }
+
+    if (node.callee.type === Syntax.MemberExpression && node.callee.object.type === Syntax.ThisExpression) {
         let classBody = null;
         let predecessor = node.parent;
         while (predecessor && !classBody) {
-            if (predecessor.type === "ClassBody") {
+            if (predecessor.type === Syntax.ClassBody) {
                 classBody = predecessor;
                 break;
             }
@@ -183,13 +231,51 @@ function findCallDefinition(node) {
             }
         }
     }
+
+    let identifier = null;
+    if (node.callee.type === Syntax.Identifier) {
+        identifier = node.callee;
+    } else if (node.callee.type === Syntax.MemberExpression) {
+        identifier = node.callee.object;
+        // } else if (node.callee.type === Syntax.TaggedTemplateExpression) {
+        //     id = node.callee.tag;
+        // } else if (node.callee.type === Syntax.ImportSpecifier) {
+        //     id = node.callee.imported;
+        // } else if (node.callee.type === Syntax.ImportDefaultSpecifier) {
+        //     id = node.callee.local;
+        // } else if (node.callee.type === Syntax.ImportNamespaceSpecifier) {
+        //     id = node.callee.local;
+    } else if (node.callee.type === Syntax.FunctionExpression) {
+        // identifier = node.callee.id;
+        return node.callee;
+    } else if (node.callee.type === Syntax.ArrowFunctionExpression) {
+        // identifier = node.callee.id;
+        return node.callee;
+    } else if (node.callee.type === Syntax.AssignmentExpression) {
+        identifier = node.callee.left;
+    }
+    let variable = findCorrespondingVariable(identifier, currentScope);
+    if (variable && variable.defs) {
+        let defs = variable.defs.filter((d) => d.type !== "Parameter");
+        if (defs.length > 0) {
+            if (debug && defs.length > 1) {
+                console.warn("Multiple definitions for variable", variable);
+            }
+            let { node } = defs[0]; // TODO: Support multiple definitions
+            if (node) {
+                return node;
+            }
+        }
+    }
+
     if (node.arguments && node.arguments.length > 0) {
         for (let arg of node.arguments) {
-            if (arg.type === "FunctionExpression") {
+            if (arg.type === Syntax.FunctionExpression) {
                 return arg;
             }
         }
     }
+
     return null;
 }
 
@@ -351,38 +437,56 @@ async function renderOutput(outputPath, data) {
 
     for (const file of srcFiles) {
         if (debug && file.includes("assets") && !file.includes("setup.js")) {
+        // if (debug && !file.includes("index.js")) {
             continue;
         }
         try {
             const code = await readFile(file);
             srcContents[file] = code.toString();
-            const ast = AST.parse(code, { "ecmaVersion": "latest", "sourceType": "module" });
-
-            scan.createScope(ast, ["module", "require", "exports", "__dirname", "__filename"]);
-            scan.crawl(ast);
+            const ast = parse(code, {
+                "ecmaVersion": latestEcmaVersion,
+                "range":       true,
+                "sourceType":  "module",
+            });
+            const scopeManager = analyze(ast, {
+                "ecmaVersion": latestEcmaVersion,
+                "sourceType":  "module",
+            });
+            let currentScope = scopeManager.acquire(ast);
 
             let libsInFile = {};
             let saveLib = async(libName, parent) => {
                 libsInFile[libName] = libName.toString().toLowerCase()
-                    .endsWith(".json") ? {} : discoverAPI(ast, parent); // API of lib (don't find API of json files)
+                    .endsWith(".json") ? {} : discoverAPI(currentScope, parent); // API of lib (don't find API of json files?)
             };
 
             calls[file] = {};
-            let saveCall = async(source, target, node) => {
+            let saveCall = (source, target, node) => {
                 if (!source || !target) {
                     return;
                 }
+
+                // // TODO: Support imports
+                // let isLibCall = target.init && target.init.callee && target.init.callee.name === "require";
+
                 // let parentPath = dirname(file);
                 // eslint-disable-next-line no-nested-ternary
-                let sourceLabel = source.type === "Program" ? "(toplevel)" : (source.id ? source.id.name : (source.key ? source.key.name : "(anonymous)"));
+                let sourceLabel = source.type === Syntax.Program ? "(toplevel)" : (source.id ? source.id.name : (source.key ? source.key.name : "(anonymous)"));
                 let sourceId = `${sourceLabel}-${source.start}-${source.end}`;
                 // eslint-disable-next-line no-nested-ternary
-                let targetLabel = target.id ? target.id.name : (target.key ? target.key.name : "(anonymous)");
+                let targetLabel = target.id ? target.id.name || node.callee.name : (target.key ? target.key.name : "(anonymous)");
                 let targetId = `${targetLabel}-${target.start}-${target.end}`;
                 let edgeId = `${relative(srcPath, file)} | ${sourceId} -> ${targetId}`;
 
+                if (debug && !sourceLabel) {
+                    console.warn("sourceLabel is empty", source);
+                }
+                if (debug && !targetLabel) {
+                    console.warn("targetLabel is empty", target);
+                }
+
                 let caller = {
-                    "type":  node.type,
+                    // "type":  node.type,
                     "start": node.start,
                     "end":   node.end,
                 };
@@ -395,9 +499,22 @@ async function renderOutput(outputPath, data) {
                         "color":  "#fff",
                         "id":     sourceId,
                         "parent": relative(srcPath, file), // TODO: parent
-                        "type":   source.type === "ClassDeclaration" ? "Class" : "Function call",
+                        "type":   source.type === Syntax.ClassDeclaration ? "Class" : "Function call",
                     },
                 };
+
+                // if (isLibCall) {
+                //     // 'require' only takes 1 argument: https://nodejs.org/api/modules.html#requireid
+                //     let argNode = target.init.arguments[0];
+                //     let libName = constructString(argNode);
+                //     if (debug && !libName) {
+                //         console.warn("Unable to determine library name from require (skipping)", node);
+                //         return;
+                //     }
+                //     libName = libName.toString();
+                //     targetId = `${libName} | ${targetLabel}`;
+                // } else {
+
                 // node (target)
                 calls[file][targetId] = {
                     "data": {
@@ -409,6 +526,9 @@ async function renderOutput(outputPath, data) {
                         "type":   "Function call",
                     },
                 };
+
+                // }
+
                 // edge
                 calls[file][edgeId] = {
                     "data": {
@@ -421,48 +541,58 @@ async function renderOutput(outputPath, data) {
                 };
             };
 
-            astWalk(ast, (node, parents) => {
-                let parent = parents[parents.length - 2];
-                if (node.type === "ImportDeclaration") {
-                    let libName = node.source.value;
-                    if (!libName) {
-                        console.error("Unable to determine library name 1 (skipping)", node, JSON.stringify(node, null, 2));
-                        return;
+            traverse(ast, {
+                "leave": (node) => {
+                    if (/Function/.test(node.type)) {
+                        currentScope = currentScope.upper; // set to parent scope
                     }
-                    saveLib(libName, parent);
-                } else if (node.type === "CallExpression") {
-                    // call -> findscope -> subroutine (source)
-                    // /    -> findref -> definition (target)
-                    let source = findCallSource(node);
-                    let target = findCallDefinition(node);
-                    saveCall(source, target, node);
+                },
+                "enter": (node, parent) => {
+                    if (/Function/.test(node.type)) {
+                        currentScope = scopeManager.acquire(node); // get current function scope
+                    }
 
-                    if (node.callee.name === "require") {
-                        // 'require' only takes 1 argument: https://nodejs.org/api/modules.html#requireid
-                        let argNode = node.arguments[0];
-                        let libName = constructString(argNode);
-                        if (!libName) {
-                            console.error("Unable to determine library name 2 (skipping)", node, JSON.stringify(node, null, 2));
+                    if (node.type === Syntax.ImportDeclaration) {
+                        let libName = node.source.value;
+                        if (debug && !libName) {
+                            console.warn("Unable to determine library name from import (skipping)", node);
                             return;
                         }
-                        libName = libName.toString();
-                        if (libName.includes(srcPath)) { // fix path notation
-                            libName = resolve(libName);
-                        }
-                        // if (libName.startsWith(".")) { // relative to absolute path
-                        //     libName = resolve(file, libName);
-                        // }
                         saveLib(libName, parent);
-                    }
-                } else if (node.type === "ClassDeclaration") {
-                    for (let method of node.body.body) {
-                        if (method.type === "MethodDefinition") {
-                            saveCall(node, method, method);
+                    } else if (node.type === Syntax.CallExpression) {
+                        if (node.callee.name === "require") {
+                            // 'require' only takes 1 argument: https://nodejs.org/api/modules.html#requireid
+                            let argNode = node.arguments[0];
+                            let libName = constructString(argNode);
+                            if (debug && !libName) {
+                                console.warn("Unable to determine library name from require (skipping)", node);
+                                return;
+                            }
+                            libName = libName.toString();
+                            if (libName.includes(srcPath)) { // fix path notation
+                                libName = resolve(libName);
+                            }
+                            // if (libName.startsWith(".")) { // relative to absolute path
+                            //     libName = resolve(file, libName);
+                            // }
+                            saveLib(libName, parent);
+                        } else {
+                            // // call -> findscope -> subroutine (source)
+                            // // /    -> findref -> definition (target)
+                            let source = findCallSource(node, currentScope);
+                            let target = findCallDefinition(node, currentScope);
+                            saveCall(source, target, node);
                         }
+                    } else if (node.type === Syntax.ClassDeclaration) {
+                        for (let method of node.body.body) {
+                            if (method.type === Syntax.MethodDefinition) {
+                                saveCall(node, method, method);
+                            }
+                        }
+                        let source = findCallSource(node, currentScope);
+                        saveCall(source, node, node);
                     }
-                    // let source = findCallSource(node);
-                    // saveCall(source, node, node);
-                }
+                },
             });
             libs[file] = libsInFile;
         } catch (e) {
@@ -473,7 +603,7 @@ async function renderOutput(outputPath, data) {
     }
 
     if (debug) {
-        console.log(JSON.stringify(calls, null, 2));
+        // console.log(JSON.stringify(calls, null, 2));
     }
 
     // GROUPS
@@ -634,6 +764,7 @@ async function renderOutput(outputPath, data) {
                             // "source": fileId,
                             "source": treeData.find((e) => e.data.id === api[name].sourceId) ? api[name].sourceId : fileId, // Workaround, TODO: Fix this
                             "target": `${libName} | ${name}`,
+                            // TODO: swap source & target?
                         },
                     });
                     recurseApi(libName, api[name].children, name);
