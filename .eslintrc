@@ -70,7 +70,6 @@
         "linebreak-style": ["error", "unix"],
         "lines-between-class-members": ["error", "always"],
         "max-classes-per-file": ["error"],
-        "max-depth": ["error", 5],
         "max-nested-callbacks": ["error", 4],
         "max-statements-per-line": ["error", {
             "max": 2

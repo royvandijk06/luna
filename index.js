@@ -1,44 +1,49 @@
 #!/usr/bin/env node
 
-const srcPath = process.argv[2] || process.cwd() || __dirname;
-const debug = true;
-if (debug) { console.log({ srcPath }); }
+const srcPath = process.argv[2] || process.cwd();
+if (!srcPath) {
+    throw new Error("No project path specified");
+}
 
-const { basename, resolve, relative, dirname, extname } = require("path");
+const { basename, dirname, extname, relative, resolve } = require("path");
 const { exec } = require("child_process");
+const { generateFlatAST } = require("flast");
 const { promisify } = require("util");
 const { readFile, writeFile, stat } = require("fs/promises");
-const AST = require("acorn-loose");
-const astWalk = require("acorn-walk").fullAncestor;
 const ejs = require("ejs");
 const fetch = require("node-fetch");
 const glob = require("glob");
+const pkg = require(resolve(srcPath, "./package.json"));
 const randomColor = require("randomcolor");
-const scan = require("scope-analyzer");
 
 const depsCache = {};
-
-function astNodeEquals(a, b) {
-    return ["type", "start", "end"].every((k) => a[k] === b[k]);
-}
+const configDefault = {
+    "debug":      false,
+    "components": {
+        "callGraph":      true,
+        // "callGraph":      false,
+        // "dependencyTree": true,
+        "dependencyTree": false,
+        // "libraryAPI":     true,
+        "libraryAPI":     false,
+    },
+};
+const config = { ...configDefault, ...pkg.luna || {} };
+config.debug = process.argv[3] === "1" || process.argv[3] === "true" ? true : config.debug;
 
 function findReferences(node) {
     if (!node) {
-        if (debug) { console.log(new Error("No node")); }
+        if (config.debug) { console.log(new Error("No node")); }
         return [];
     }
-    if (node.type !== "Identifier") {
-        // if (debug) { console.log(new Error("Not an identifier"), node); }
-        return [];
-    }
-    // console.log({ node });
-    let binding = scan.getBinding(node);
-    if (!binding) {
-        // console.log("NO BINDING", { node });
-        return [];
-    }
-    let notItself = (ref) => !astNodeEquals(ref, node);
-    return binding.getReferences().filter(notItself);
+
+    let references = [].concat(node.references || [], node.declNode ? [node.declNode] : []);
+    let refIds = [node.nodeId];
+    return references.filter((n) => {
+        let res = !refIds.includes(n.nodeId);
+        refIds.push(n.nodeId);
+        return res;
+    });
 }
 
 /* Possibilities:
@@ -46,8 +51,18 @@ function findReferences(node) {
  * 2. Library is loaded destructively into multiple objects => require(...) = library name
  * 3. After library is loaded, it gets instantiated
  */
-function discoverAPI(ast, parent, _api = {}) {
+// Workaround, TODO: Fix endless cycle
+let nodesSeen = [];
+function discoverAPI(parent, _api = {}) {
+    if (!config.components.libraryAPI) {
+        return {};
+    }
     let api = _api;
+    if (nodesSeen.includes(parent.nodeId)) {
+        return api;
+    }
+    nodesSeen.push(parent.nodeId);
+
     let addToAPI = (name, node) => {
         // eslint-disable-next-line no-use-before-define
         let source = findCallSource(node);
@@ -58,15 +73,8 @@ function discoverAPI(ast, parent, _api = {}) {
         api[name].name = name;
         api[name].sourceId = sourceId;
         api[name].nodes = (api[name].nodes || []).concat([node]);
-        // skip API discovery, if API was an object property (workaround for https://github.com/goto-bus-stop/scope-analyzer/issues/32)
-        if (node.parent.property && astNodeEquals(node.parent.property, node)) {
-            return;
-        }
         for (let ref of findReferences(node)) {
-            if (astNodeEquals(ref.parent, parent)) { // cycle?
-                continue;
-            }
-            api[name].children = discoverAPI(ast, ref.parent, api[name].children);
+            api[name].children = discoverAPI(ref.parentNode, api[name].children);
         }
     };
 
@@ -84,93 +92,57 @@ function discoverAPI(ast, parent, _api = {}) {
     } else if (parent.id) { // variable name
         let added = false;
         for (let ref of findReferences(parent.id)) {
-            if (ref.parent.type === "CallExpression" && !added) { // lib variable is a function
+            if (ref.parentNode.type === "CallExpression" && !added) { // lib variable is a function
                 addToAPI(`(reference)\nas "${parent.id.name}"`, parent.id);
                 added = true;
             }
-            api = discoverAPI(ast, ref.parent, api);
+            api = discoverAPI(ref.parentNode, api);
         }
     } else if (parent.type === "NewExpression") { // new instance of library
-        if (parent.parent.id) { // instance assigned to a variable
-            addToAPI("(instance)", parent.parent.id);
-        } else if (parent.parent.left && parent.parent.left.property && !parent.parent.left.computed) { // instance assigned to a property
-            addToAPI("(instance)", parent.parent.left.property);
+        if (parent.parentNode.id) { // instance assigned to a variable
+            addToAPI("(instance)", parent.parentNode.id);
+        } else if (parent.parentNode.left && parent.parentNode.left.property && !parent.parentNode.left.computed) { // instance assigned to a property
+            addToAPI("(instance)", parent.parentNode.left.property);
         }
-    } else {
-        // console.log("CANNOT FIND API", { parent });
+    } else if (config.debug) {
+        console.warn("Could not find API for", parent);
     }
     return api;
 }
 
-// function findCallSource(node) {
-//     let source = null;
-//     let predecessor = node.parent;
-//     while (!source && predecessor) {
-//         if (predecessor.type === "FunctionDeclaration" || predecessor.type === "VariableDeclarator" || predecessor.type === "Program") {
-//             source = predecessor;
-//         }
-//         predecessor = predecessor.parent;
-//     }
-//     return source;
-// }
-
 function findCallSource(node) {
-    let source = null;
-    let predecessor = node.parent;
-    while (!source && predecessor) {
-        if (predecessor.type === "Program") {
-            source = predecessor;
-        } else if (predecessor.type === "BlockStatement") {
-            if (predecessor.parent.parent.type === "VariableDeclarator") { // function assigned to a variable
-                source = predecessor.parent.parent;
-            } else if (predecessor.parent.type === "FunctionDeclaration") { // function with name
-                source = predecessor.parent;
-            } else if (predecessor.parent.type === "MethodDefinition") { // method
-                source = predecessor.parent;
-            } else if (predecessor.parent.type === "FunctionExpression") { // nameless function
-                source = predecessor.parent;
-                if (predecessor.parent.parent.type === "MethodDefinition") { // method
-                    source = predecessor.parent.parent;
-                // } else if (predecessor.parent.parent.type === "CallExpression") {
-                //     source = findCallSource(predecessor.parent.parent);
-                }
-            } else if (predecessor.parent.type === "ArrowFunctionExpression") { // nameless arrow function
-                source = predecessor.parent;
-                // if (predecessor.parent.parent.type === "CallExpression") {
-                //     source = findCallSource(predecessor.parent.parent);
-                // }
-            }
-        }
-        predecessor = predecessor.parent;
+    let betterScope = node.scope;
+    while (!betterScope.type.toLowerCase().includes("function") && !betterScope.type.toLowerCase().includes("module") && betterScope.upper) {
+        betterScope = betterScope.upper;
     }
-    return source;
+    return betterScope.block;
 }
 
 // @returns FunctionExpression|FunctionExpression|FunctionDeclaration
 function findCallDefinition(node) {
     if (node.callee.type === "FunctionExpression") {
-        if (node.callee.parent.type === "MethodDefinition") { // method
-            return node.callee.parent;
+        if (node.callee.parentNode.type === "MethodDefinition") { // method
+            return node.callee.parentNode;
         }
         return node.callee;
     }
     if (node.callee.type === "Identifier" || node.callee.type === "MemberExpression") {
         let id = node.callee.type === "MemberExpression" ? node.callee.property : node.callee;
         for (let ref of findReferences(id)) { // findReferences once again lacking...
-            if (ref.parent.type === "FunctionDeclaration" || ref.parent.type === "VariableDeclarator" || ref.parent.type === "MethodDefinition") {
-                return ref.parent;
+            if (ref.parentNode.type === "FunctionDeclaration" || ref.parentNode.type === "VariableDeclarator" || ref.parentNode.type === "MethodDefinition") {
+                return ref.parentNode;
             }
         }
     }
     if (node.callee.type === "MemberExpression" && node.callee.object.type === "ThisExpression") {
         let classBody = null;
-        let predecessor = node.parent;
+        let predecessor = node.parentNode;
         while (predecessor && !classBody) {
             if (predecessor.type === "ClassBody") {
                 classBody = predecessor;
                 break;
             }
-            predecessor = predecessor.parent;
+            predecessor = predecessor.parentNode;
         }
         if (classBody) {
             for (let method of classBody.body) {
@@ -194,6 +166,9 @@ function findCallDefinition(node) {
 }
 
 async function getDependencies(name, version) {
+    if (!config.components.dependencyTree) {
+        return {};
+    }
     if (depsCache[`${name}@${version}`]) {
         return depsCache[`${name}@${version}`];
     }
@@ -224,12 +199,9 @@ async function getDependencies(name, version) {
 
 async function parseDependencies(dependencies, devDependencies = {}) {
     let node_modules = {};
-    // let deps = { ...dependencies, ...devDependencies };
-    // eslint-disable-next-line prefer-object-spread
-    let deps = Object.assign({}, dependencies, devDependencies);
+    let deps = { ...dependencies, ...devDependencies };
 
     for (let dep in deps) {
-    // await Promise.all(Object.keys(deps).map(async(dep) => {
         let version = deps[dep].replace(/^\^/, ""); // TODO: https://stackoverflow.com/a/64990875/4356020
         node_modules[dep] = {
             version,
@@ -238,7 +210,6 @@ async function parseDependencies(dependencies, devDependencies = {}) {
         if (Object.keys(node_modules[dep].dependencies).length === 0) {
             delete node_modules[dep].dependencies;
         }
-    // }));
     }
 
     return node_modules;
@@ -316,8 +287,6 @@ async function renderOutput(outputPath, data) {
         "cyElk":         resolve(__dirname, "assets", "js", "cytoscape-elk.js"),
         "cola":          resolve(__dirname, "assets", "js", "cola.min.js"),
         "cyCola":        resolve(__dirname, "assets", "js", "cytoscape-cola.js"),
-        // "dagre":      resolve(__dirname, "assets", "js", "dagre.js"),
-        // "cyDagre":    resolve(__dirname, "assets", "js", "cytoscape-dagre.js"),
         "shim":          resolve(__dirname, "assets", "js", "shim.min.js"),
         "layoutBase":    resolve(__dirname, "assets", "js", "layout-base.js"),
         "coseBase":      resolve(__dirname, "assets", "js", "cose-base.js"),
@@ -335,12 +304,32 @@ async function renderOutput(outputPath, data) {
     return writeFile(resolve(outputPath, "./luna.html"), html);
 }
 
+/**
+ * https://github.com/eslint/eslint/blob/b93af98b3c417225a027cabc964c38e779adb945/lib/linter/linter.js#L718
+ * Strips Unicode BOM from a given text.
+ * @param {string} text A text to strip.
+ * @returns {string} The stripped text.
+ */
+function stripUnicodeBOM(text) {
+    /*
+     * Check Unicode BOM.
+     * In JavaScript, string data is stored as UTF-16, so BOM is 0xFEFF.
+     * http://www.ecma-international.org/ecma-262/6.0/#sec-unicode-format-control-characters
+     */
+    if (text.charCodeAt(0) === 0xFEFF) {
+        return text.slice(1);
+    }
+    return text;
+}
+
 (async function main() {
+    if (config.debug) { console.log({ srcPath }); }
+
     let getFiles = promisify(glob);
     // all javascript files in the project (excluding node_modules)
     let pattern = resolve(`${srcPath}/{,!(node_modules)/**/}*.{js,mjs}`).replace(/\\/g, "/");
     let srcFiles = (await getFiles(pattern)).map((f) => resolve(f));
-    let { name, version, devDependencies, dependencies, main } = JSON.parse(await readFile(resolve(srcPath, "./package.json"), "utf8"));
+    let { name, version, devDependencies, dependencies, main } = pkg;
     let hasNodeModules = await stat(resolve(srcPath, "./node_modules")).then(() => true)
         .catch(() => false);
     let node_modules = await getNodeModules(hasNodeModules, dependencies, devDependencies);
@@ -350,29 +339,34 @@ async function renderOutput(outputPath, data) {
     let calls = {};
 
     for (const file of srcFiles) {
-        if (debug && file.includes("assets") && !file.includes("setup.js")) {
-            continue;
-        }
         try {
             const code = await readFile(file);
             srcContents[file] = code.toString();
-            const ast = AST.parse(code, { "ecmaVersion": "latest", "sourceType": "module" });
-
-            scan.createScope(ast, ["module", "require", "exports", "__dirname", "__filename"]);
-            scan.crawl(ast);
+            // https://github.com/eslint/eslint/blob/b93af98b3c417225a027cabc964c38e779adb945/lib/linter/linter.js#L779
+            const textToParse = stripUnicodeBOM(code.toString()).replace(/^#!([^\r\n]+)/u, (match, captured) => `//${captured}`);
+            const ast = generateFlatAST(textToParse, {
+                "includeSrc": false,
+                "parseOpts":  { "ecmaVersion": "latest", "sourceType": "module" },
+            });
 
             let libsInFile = {};
             let saveLib = async(libName, parent) => {
                 libsInFile[libName] = libName.toString().toLowerCase()
-                    .endsWith(".json") ? {} : discoverAPI(ast, parent); // API of lib (don't find API of json files)
+                    .endsWith(".json") ? {} : discoverAPI(parent); // API of lib (don't find API of json files)
             };
 
             calls[file] = {};
-            let saveCall = async(source, target, node) => {
+            let saveCall = (source, target, node) => {
+                if (!config.components.callGraph) {
+                    return;
+                }
                 if (!source || !target) {
                     return;
                 }
-                // let parentPath = dirname(file);
+
+                // // TODO: Support imports
+                // let isLibCall = target.init && target.init.callee && target.init.callee.name === "require";
+
                 // eslint-disable-next-line no-nested-ternary
                 let sourceLabel = source.type === "Program" ? "(toplevel)" : (source.id ? source.id.name : (source.key ? source.key.name : "(anonymous)"));
                 let sourceId = `${sourceLabel}-${source.start}-${source.end}`;
@@ -380,6 +374,13 @@ async function renderOutput(outputPath, data) {
                 let targetLabel = target.id ? target.id.name : (target.key ? target.key.name : "(anonymous)");
                 let targetId = `${targetLabel}-${target.start}-${target.end}`;
                 let edgeId = `${relative(srcPath, file)} | ${sourceId} -> ${targetId}`;
+
+                if (config.debug && !sourceLabel) {
+                    console.warn("sourceLabel is empty", source);
+                }
+                if (config.debug && !targetLabel) {
+                    console.warn("targetLabel is empty", target);
+                }
 
                 let caller = {
                     "type":  node.type,
@@ -398,6 +399,19 @@ async function renderOutput(outputPath, data) {
                         "type":   source.type === "ClassDeclaration" ? "Class" : "Function call",
                     },
                 };
+
+                // if (isLibCall) {
+                //     // 'require' only takes 1 argument: https://nodejs.org/api/modules.html#requireid
+                //     let argNode = target.init.arguments[0];
+                //     let libName = constructString(argNode);
+                //     if (debug && !libName) {
+                //         console.warn("Unable to determine library name from require (skipping)", node);
+                //         return;
+                //     }
+                //     libName = libName.toString();
+                //     targetId = `${libName} | ${targetLabel}`;
+                // } else {
+
                 // node (target)
                 calls[file][targetId] = {
                     "data": {
@@ -409,6 +423,9 @@ async function renderOutput(outputPath, data) {
                         "type":   "Function call",
                     },
                 };
+
+                // }
+
                 // edge
                 calls[file][edgeId] = {
                     "data": {
@@ -421,13 +438,15 @@ async function renderOutput(outputPath, data) {
                 };
             };
 
-            astWalk(ast, (node, parents) => {
-                let parent = parents[parents.length - 2];
+            for (let node of ast) {
+                let parent = node.parentNode;
                 if (node.type === "ImportDeclaration") {
                     let libName = node.source.value;
                     if (!libName) {
-                        console.error("Unable to determine library name 1 (skipping)", node, JSON.stringify(node, null, 2));
-                        return;
+                        if (config.debug) {
+                            console.warn("Unable to determine library name from import (skipping)", node);
+                        }
+                        continue;
                     }
                     saveLib(libName, parent);
                 } else if (node.type === "CallExpression") {
@@ -442,16 +461,18 @@ async function renderOutput(outputPath, data) {
                         let argNode = node.arguments[0];
                         let libName = constructString(argNode);
                         if (!libName) {
-                            console.error("Unable to determine library name 2 (skipping)", node, JSON.stringify(node, null, 2));
-                            return;
+                            if (config.debug) {
+                                console.warn("Unable to determine library name from require (skipping)", node);
+                            }
+                            continue;
                         }
                         libName = libName.toString();
+                        if (libName.startsWith(".")) { // relative to absolute path
+                            libName = resolve(dirname(file), libName);
+                        }
                         if (libName.includes(srcPath)) { // fix path notation
                             libName = resolve(libName);
                         }
-                        // if (libName.startsWith(".")) { // relative to absolute path
-                        //     libName = resolve(file, libName);
-                        // }
                         saveLib(libName, parent);
                     }
                 } else if (node.type === "ClassDeclaration") {
@@ -460,20 +481,20 @@ async function renderOutput(outputPath, data) {
                             saveCall(node, method, method);
                         }
                     }
+                    // Add connection between class and the scope it is defined in?
                     // let source = findCallSource(node);
                     // saveCall(source, node, node);
                 }
-            });
+            }
             libs[file] = libsInFile;
-        } catch (e) {
-            console.error(`Unable to parse "${file}": ${e}`);
-            console.log(e);
+        } catch (err) {
+            console.error(`Unable to parse "${file}":`, err);
             continue;
         }
     }
 
-    if (debug) {
-        console.log(JSON.stringify(calls, null, 2));
+    if (config.debug) {
+        console.log("FUNCTION CALLS\n", calls);
     }
 
     // GROUPS
@@ -493,7 +514,9 @@ async function renderOutput(outputPath, data) {
     let libSet = Array.from(new Set(Object.values(libs).map((lib) => Object.keys(lib))
         .flat()
         .concat(Object.keys(node_modules))));
-    if (debug) { console.log({ libSet }); }
+    if (config.debug) {
+        console.log("LIBRARIES\n", libSet);
+    }
     let nLibs = libSet.length; // number of libraries?
     let randomColors = randomColor({
         "count":      nLibs,
@@ -566,11 +589,17 @@ async function renderOutput(outputPath, data) {
                 let internalPath = resolve(dirname(file), libName);
                 let ext = extname(internalPath);
                 let altInternalPath = ext ? internalPath.replace(ext, "") : `${internalPath}.js`; // sometimes the extension is missing, TODO: support folder/index.js
+
+                // If this internal dependency is among src files, it is a file node.
                 let srcFile = srcFiles.find((f) => f === internalPath || f === altInternalPath);
                 isInternalDep = Boolean(srcFile);
                 if (isInternalDep) {
                     let fileId = relative(srcPath, srcFile);
                     id = fileId;
+                }
+                if (id.includes(srcPath)) {
+                    // fix path notation
+                    id = relative(srcPath, id);
                 }
             }
             if (!colors[id]) {
@@ -582,7 +611,7 @@ async function renderOutput(outputPath, data) {
                 treeData.push({
                     "data": {
                         id,
-                        "isData":  libName.toLocaleLowerCase().endsWith(".json"), // weak detection
+                        "isData":  libName.toLocaleLowerCase().endsWith(".json"), // weak detection?
                         "library": { "name": libName, version },
                         "color":   colors[id],
                         "parent":  externalLibs.includes(libName) ? "external" : "internal", // group: external or internal
@@ -634,6 +663,7 @@ async function renderOutput(outputPath, data) {
                             // "source": fileId,
                             "source": treeData.find((e) => e.data.id === api[name].sourceId) ? api[name].sourceId : fileId, // Workaround, TODO: Fix this
                             "target": `${libName} | ${name}`,
+                            // TODO: swap source & target?
                         },
                     });
                     recurseApi(libName, api[name].children, name);
@@ -705,7 +735,10 @@ async function renderOutput(outputPath, data) {
         }
     };
     traverseTree(node_modules);
-    // console.log({ node_modules });
+
+    if (config.debug) {
+        console.log("DEPENDENCIES OF LIBRARIES (NODE_MODULES)\n", node_modules);
+    }
 
     renderOutput(srcPath, {
         name,
