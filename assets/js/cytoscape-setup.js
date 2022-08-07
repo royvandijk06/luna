@@ -828,6 +828,30 @@ class LUNA {
             }
         };
 
+        let treeDblClickHandler = (evt) => {
+            let row = evt.target.closest(".folder-root");
+            if (!row) {
+                return;
+            }
+            row = row.parentNode;
+            let i = row.querySelector(":scope > .folder-root > i");
+            if (row.classList.contains("collapsed")) {
+                row.classList.remove("collapsed");
+                row.querySelector(":scope > ul").style.display = "block";
+                if (i.classList.toString().includes("-folder")) {
+                    i.classList.remove("fa-folder");
+                    i.classList.add("fa-folder-open");
+                }
+            } else {
+                row.classList.add("collapsed");
+                row.querySelector(":scope > ul").style.display = "none";
+                if (i.classList.toString().includes("-folder")) {
+                    i.classList.remove("fa-folder-open");
+                    i.classList.add("fa-folder");
+                }
+            }
+        };
+
         let paths = this.data.filter((e) => e.data.filePath);
         let fileTree = {};
         let sep = paths[0].data.filePath.includes("/") ? "/" : "\\";
@@ -857,7 +881,7 @@ class LUNA {
                 }
                 let value = obj[key];
                 let dir = path + sep + key;
-                html += `<li id="${dir}"><button style="float: right;" class="toggle"><i class="fa-solid fa-eye"></i></button><i class="fa fa-folder-open"></i> ${key}`;
+                html += `<li id="${dir}"><button style="float: right;" class="toggle"><i class="fa-solid fa-eye"></i></button><div class="folder-root"><i class="fa fa-folder-open"></i> ${key}</div>`;
                 html += `${getFileTreeHTML(value, dir)}`;
                 html += "</li>";
             }
@@ -877,8 +901,11 @@ class LUNA {
             if (!libs[cat]) {
                 continue;
             }
-            html += `<div id="${cat}"><button style="float: right;" class="toggle"><i class="fa-solid fa-eye"></i></button><i class="fa-solid fa-align-justify"></i> ${catLabels[cat]} <ul>`;
-            for (let lib of libs[cat].sort()) {
+            html += `<div id="${cat}"><button style="float: right;" class="toggle"><i class="fa-solid fa-eye"></i></button><div class="folder-root"><i class="fa-solid fa-align-justify"></i> ${catLabels[cat]} </div><ul>`;
+            let libKeys = {};
+            libs[cat].forEach((e) => { libKeys[e.data.id] = e; });
+            for (let libKey of Object.keys(libKeys).sort()) {
+                let lib = libKeys[libKey];
                 html += `<li id="${lib.data.id}">
                     <button style="float: right;" class="toggle off"><i class="fa-solid fa-eye"></i></button>
                     <button style="float: right;" class="highlight off"><i class="fa-regular fa-lightbulb"></i></button>
@@ -888,56 +915,8 @@ class LUNA {
             html += "</ul></div>";
         }
         this.DOM.settingsPanel.libTree.innerHTML = `${html}`;
-        // this.DOM.settingsPanel.fileTree.insertAdjacentHTML("beforebegin", "<button data-ids=\"files\" class=\"toggle on\"><i class=\"fa-solid fa-eye\"></i></button>");
-        // this.DOM.settingsPanel.libTree.insertAdjacentHTML("beforebegin", "<button data-ids=\"libs,deps\" class=\"toggle on\"><i class=\"fa-solid fa-eye\"></i></button>");
         this.DOM.settingsPanel.container.addEventListener("click", treeClickHandler);
-
-        // let fileSelect = this.data.filter((e) => e.data.filePath).reduce((o, e) => {
-        //     let basepath = e.data.id.replace(e.data.label, "") || "(root)";
-        //     o[basepath] = o[basepath] || [];
-        //     o[basepath].push(e.data);
-        //     return o;
-        // }, {});
-        // let fileSelectHTML = Object.keys(fileSelect).sort()
-        //     .map((basepath) => {
-        //         let files = fileSelect[basepath].sort();
-        //         let html = `<optgroup label="${basepath}">`;
-        //         files.reverse().forEach((file) => {
-        //             html += `<option value="${file.id}">${file.label}</option>`;
-        //         });
-        //         html += "</optgroup>";
-        //         return html;
-        //     })
-        //     .join("");
-        // this.DOM.settingsPanel.fileSelect.innerHTML = fileSelectHTML;
-        // this.DOM.settingsPanel.fileSelect.addEventListener("change", () => {
-        //     let file = this.DOM.settingsPanel.fileSelect.value;
-        //     this.selectedNodes.clear();
-        //     this.selectedNodes.add(file);
-        //     let node = this.cy.$id(file);
-        //     if (node.length) { this.setInfoPanel(node.data()); }
-        //     if (!this.isLocked) {
-        //         this.DOM.infoPanel.lockBtn.click();
-        //     }
-        //     this.highlightNodes();
-        // });
-
-        // let libSelectHTML = [...new Set(this.data.filter((e) => e.data.library).map((e) => `<option value="${e.data.id}">${e.data.label}</option>`))]
-        //     .sort()
-        //     .join("");
-        // this.DOM.settingsPanel.libSelect.innerHTML = libSelectHTML;
-        // this.DOM.settingsPanel.libSelect.addEventListener("input", () => {
-        //     let lib = this.DOM.settingsPanel.libSelect.value;
-        //     this.selectedNodes.clear();
-        //     this.selectedNodes.add(lib);
-        //     let node = this.cy.$id(lib);
-        //     if (node.length) { this.setInfoPanel(node.data()); }
-        //     if (!this.isLocked) {
-        //         this.DOM.infoPanel.lockBtn.click();
-        //     }
-        //     this.highlightNodes();
-        // });
-
+        this.DOM.settingsPanel.container.addEventListener("dblclick", treeDblClickHandler);
         this.makeCy(style, layouts);
     }
 

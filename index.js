@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* eslint-disable max-depth */
 
 const srcPath = process.argv[2] || process.cwd();
 if (!srcPath) {

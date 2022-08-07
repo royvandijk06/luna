@@ -159,6 +159,15 @@ td {
     padding: 0.25em;
 }
 
+.folder-root {
+    cursor: pointer;
+    margin-bottom: 0.5em;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+}
+
 .file-tree ul {
     padding-left: 5px;
     list-style: none;
@@ -216,7 +225,7 @@ td {
 #fileTree,
 #libTree {
     padding-left: 0.5em;
-    max-height: 16em;
+    max-height: 10em;
     overflow-y: auto;
     overflow-x: hidden;
 }
