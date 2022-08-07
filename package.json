@@ -6,7 +6,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "test": "powershell \"node test.js 2>&1 | tee test.log -Append\""
+    "test": "powershell \"node test.js 2>&1 | tee test.log\""
   },
   "keywords": [
     "analysis",

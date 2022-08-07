@@ -18,7 +18,11 @@
         <script><%- include(paths.coseBase); -%></script>
         <script><%- include(paths.cyCoseBilkent); -%></script>
 
+        <% if (config.debug) { %>
+        <link rel="stylesheet" href="<%- paths.stylesheet %>">
+        <% } else { %>
         <style><%- include(paths.stylesheet); -%></style>
+        <% } %>
         <style><%- include(paths.fontawesome); -%></style>
         <style><%- include(paths.regularFont); -%></style>
         <style><%- include(paths.solidFont); -%></style>
@@ -96,7 +100,12 @@
         </div>
         <div id="cy" data-cy="<%= JSON.stringify(data) %>"></div>
         <script>window.data = JSON.parse(document.querySelector("#cy").dataset.cy);</script>
+        
+        <% if (config.debug) { %>
         <script src="<%= paths.cySetup %>"></script>
+        <% } else { %>
+        <script><%- include(paths.cySetup) %></script>
+        <% } %>
     </body>
 
 </html>

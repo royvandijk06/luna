@@ -300,7 +300,7 @@ async function renderOutput(outputPath, data) {
         "output":        resolve(outputPath),
     };
     let title = `${data.name || paths.output}${data.version ? `@${data.version}` : ""}`;
-    let html = await ejs.renderFile(paths.template, { title, paths, "data": data.data }, { "rmWhitespace": true });
+    let html = await ejs.renderFile(paths.template, { config, title, paths, "data": data.data }, { "rmWhitespace": true });
     return writeFile(resolve(outputPath, "./luna.html"), html);
 }
 
