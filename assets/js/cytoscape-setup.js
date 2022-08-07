@@ -20,8 +20,6 @@ class LUNA {
                 "layout":    document.querySelector("#layout"), // change layout
                 "fileTree":  document.querySelector("#fileTree"), // manipulate file nodes
                 "libTree":   document.querySelector("#libTree"), // manipulate library nodes
-                // "fileSelect": document.querySelector("#fileSelect"), // select file node to highlight
-                // "libSelect":  document.querySelector("#libSelect"), // select library node to highlight
                 "fitBtn":    document.querySelector("#fitBtn"), // reset cytoscape
                 "resetBtn":  document.querySelector("#resetBtn"), // fit cytoscape
                 "imgBtn":    document.querySelector("#imgBtn"), // save img cytoscape
@@ -77,7 +75,7 @@ class LUNA {
             }
         }
         html += `<tr><td><b>Type:</b></td><td>${type}</td></tr>`;
-        if (library) {
+        if (library && !isData) {
             html += `<tr><td><b>Library:</b></td><td>${library.name}</td></tr>`;
             if (library.version) {
                 html += `<tr><td><b>Version:</b></td><td>${library.version}</td></tr>`;

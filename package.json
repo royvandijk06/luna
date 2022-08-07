@@ -1,12 +1,12 @@
 {
   "name": "luna",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "description": "LUNA: Library Usage in Node.js Analyzer",
   "bin": "index.js",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "test": "node test.js"
+    "test": "powershell \"node test.js 2>&1 | tee test.log -Append\""
   },
   "keywords": [
     "analysis",
