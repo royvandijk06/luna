@@ -1,6 +1,6 @@
 {
   "name": "luna",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "description": "LUNA: Library Usage in Node.js Analyzer",
   "bin": "index.js",
   "main": "index.js",
@@ -40,15 +40,14 @@
   "author": "R.E.L. van Dijk",
   "license": "ISC",
   "dependencies": {
-    "acorn-loose": "^8.3.0",
-    "acorn-walk": "^8.2.0",
+    "flast": "^1.2.1",
     "ejs": "^3.1.8",
     "glob": "^8.0.1",
     "node-fetch": "^2.6.7",
-    "randomcolor": "^0.6.2",
-    "scope-analyzer": "^2.1.2"
+    "randomcolor": "^0.6.2"
   },
   "devDependencies": {
+    "eslint": "^7.32.0",
     "@babel/eslint-parser": "^7.17.0"
   }
 }

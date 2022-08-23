@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-/* eslint-disable max-depth */
 
 const srcPath = process.argv[2] || process.cwd();
 if (!srcPath) {
@@ -14,23 +13,29 @@ const { readFile, writeFile, stat } = require("fs/promises");
 const ejs = require("ejs");
 const fetch = require("node-fetch");
 const glob = require("glob");
-const pkg = require(resolve(srcPath, "./package.json"));
 const randomColor = require("randomcolor");
 
+let pkg = {};
+try {
+    pkg = require(resolve(srcPath, "./package.json"));
+} catch (unused) {
+    // ignore
+}
 const depsCache = {};
 const configDefault = {
     "debug":      false,
     "components": {
         "callGraph":      true,
+        "dependencyTree": true,
+        "libraryAPI":     true,
         // "callGraph":      false,
-        // "dependencyTree": true,
-        "dependencyTree": false,
-        // "libraryAPI":     true,
-        "libraryAPI":     false,
+        // "dependencyTree": false,
+        // "libraryAPI":     false,
     },
 };
 const config = { ...configDefault, ...pkg.luna || {} };
 config.debug = process.argv[3] === "1" || process.argv[3] === "true" ? true : config.debug;
+config.components = { ...configDefault.components, ...config.components };
 
 function findReferences(node) {
     if (!node) {
@@ -38,7 +43,8 @@ function findReferences(node) {
         return [];
     }
 
-    let references = [].concat(node.references || [], node.declNode ? [node.declNode] : []);
+    // let references = [].concat(node.references || [], node.declNode ? [node.declNode] : []);
+    let references = node.declNode ? node.declNode.references.concat([node.declNode]) : node.references || [];
     let refIds = [node.nodeId];
     return references.filter((n) => {
         let res = !refIds.includes(n.nodeId);
@@ -67,9 +73,8 @@ function discoverAPI(parent, _api = {}) {
     let addToAPI = (name, node) => {
         // eslint-disable-next-line no-use-before-define
         let source = findCallSource(node);
-        // eslint-disable-next-line no-nested-ternary
-        let sourceLabel = source.type === "Program" ? "(toplevel)" : (source.id ? source.id.name : (source.key ? source.key.name : "(anonymous)"));
-        let sourceId = `${sourceLabel}-${source.start}-${source.end}`;
+        // eslint-disable-next-line no-use-before-define
+        let { sourceId } = getCallSourceNames(source);
         api[name] = api[name] || {};
         api[name].name = name;
         api[name].sourceId = sourceId;
@@ -79,13 +84,18 @@ function discoverAPI(parent, _api = {}) {
         }
     };
 
+    // TODO: Fix API
+    if (parent.name === "relative" && parent.parentKey === "value") {
+        console.log(parent);
+    }
+
     if (parent.property && parent.computed === false) { // property of object
         addToAPI(parent.property.name, parent.property);
     } else if (parent.id && parent.id.properties) { // destructuring
         let props = parent.id.properties;
         for (const prop of props) {
-            // addToAPI(prop.value?.name || prop.key.name, prop.value || prop.key); // choose value over key if it exists
-            addToAPI((prop.value && prop.value.name) || prop.key.name, prop.value || prop.key); // choose value over key if it exists
+            addToAPI(prop.value?.name || prop.key.name, prop.value || prop.key); // choose value over key if it exists
+            // addToAPI((prop.value && prop.value.name) || prop.key.name, prop.value || prop.key); // choose value over key if it exists
             if (prop.value && prop.value.properties) {
                 // TODO: support nested destructuring
             }
@@ -113,13 +123,13 @@ function discoverAPI(parent, _api = {}) {
 
 function findCallSource(node) {
     let betterScope = node.scope;
-    while (!betterScope.type.toLowerCase().includes("function") && !betterScope.type.toLowerCase().includes("module") && betterScope.upper) {
+    while (betterScope.type && !betterScope.type.toLowerCase().includes("function") && !betterScope.type.toLowerCase().includes("module") && betterScope.upper) {
         betterScope = betterScope.upper;
     }
     return betterScope.block;
 }
 
-// @returns FunctionExpression|FunctionExpression|FunctionDeclaration
+// @returns VariableDeclarator|FunctionExpression|FunctionDeclaration|MethodDefinition
 function findCallDefinition(node) {
     if (node.callee.type === "FunctionExpression") {
         if (node.callee.parentNode.type === "MethodDefinition") { // method
@@ -129,7 +139,7 @@ function findCallDefinition(node) {
     }
     if (node.callee.type === "Identifier" || node.callee.type === "MemberExpression") {
         let id = node.callee.type === "MemberExpression" ? node.callee.property : node.callee;
-        for (let ref of findReferences(id)) { // findReferences once again lacking...
+        for (let ref of findReferences(id)) {
             if (ref.parentNode.type === "FunctionDeclaration" || ref.parentNode.type === "VariableDeclarator" || ref.parentNode.type === "MethodDefinition") {
                 return ref.parentNode;
             }
@@ -164,6 +174,62 @@ function findCallDefinition(node) {
         }
     }
     return null;
+}
+
+function getCallSourceNames(source) {
+    let sourceId = null;
+    let sourceLabel = null;
+    if (source.type === "Program") {
+        sourceLabel = "(toplevel)";
+        sourceId = `${sourceLabel}-${source.start}-${source.end}`;
+        return { sourceId, sourceLabel };
+    }
+    if (source.id) {
+        sourceLabel = source.id.name;
+        sourceId = `${sourceLabel}-${source.start}-${source.end}`;
+        return { sourceId, sourceLabel };
+    }
+    if (source.parentNode.id) {
+        sourceLabel = source.parentNode.id.name;
+        sourceId = `${sourceLabel}-${source.parentNode.start}-${source.parentNode.end}`;
+        return { sourceId, sourceLabel };
+    }
+    if (source.key) {
+        sourceLabel = source.key.name;
+        sourceId = `${sourceLabel}-${source.start}-${source.end}`;
+        return { sourceId, sourceLabel };
+    }
+    if (source.parentNode.key) {
+        sourceLabel = source.parentNode.key.name;
+        sourceId = `${sourceLabel}-${source.parentNode.start}-${source.parentNode.end}`;
+        return { sourceId, sourceLabel };
+    }
+    if (source.name) {
+        sourceLabel = source.name;
+        sourceId = `${sourceLabel}-${source.start}-${source.end}`;
+        return { sourceId, sourceLabel };
+    }
+    sourceLabel = "(anonymous)";
+    sourceId = `${sourceLabel}-${source.start}-${source.end}`;
+    return { sourceId, sourceLabel };
+}
+
+function getCallTargetNames(target) {
+    let targetId = null;
+    let targetLabel = null;
+    if (target.id) {
+        targetLabel = target.id.name;
+        targetId = `${targetLabel}-${target.start}-${target.end}`;
+        return { targetId, targetLabel };
+    }
+    if (target.key) {
+        targetLabel = target.key.name;
+        targetId = `${targetLabel}-${target.start}-${target.end}`;
+        return { targetId, targetLabel };
+    }
+    targetLabel = "(anonymous)";
+    targetId = `${targetLabel}-${target.start}-${target.end}`;
+    return { targetId, targetLabel };
 }
 
 async function getDependencies(name, version) {
@@ -302,7 +368,8 @@ async function renderOutput(outputPath, data) {
     };
     let title = `${data.name || paths.output}${data.version ? `@${data.version}` : ""}`;
     let html = await ejs.renderFile(paths.template, { config, title, paths, "data": data.data }, { "rmWhitespace": true });
-    return writeFile(resolve(outputPath, "./luna.html"), html);
+    let result = resolve(outputPath, "./luna.html");
+    return writeFile(result, html).then(() => result);
 }
 
 /**
@@ -323,7 +390,7 @@ function stripUnicodeBOM(text) {
     return text;
 }
 
-(async function main() {
+async function main() {
     if (config.debug) { console.log({ srcPath }); }
 
     let getFiles = promisify(glob);
@@ -351,7 +418,7 @@ function stripUnicodeBOM(text) {
             });
 
             let libsInFile = {};
-            let saveLib = async(libName, parent) => {
+            let saveLib = (libName, parent) => {
                 libsInFile[libName] = libName.toString().toLowerCase()
                     .endsWith(".json") ? {} : discoverAPI(parent); // API of lib (don't find API of json files)
             };
@@ -365,15 +432,11 @@ function stripUnicodeBOM(text) {
                     return;
                 }
 
-                // // TODO: Support imports
+                // // TODO: Support imports, define
                 // let isLibCall = target.init && target.init.callee && target.init.callee.name === "require";
 
-                // eslint-disable-next-line no-nested-ternary
-                let sourceLabel = source.type === "Program" ? "(toplevel)" : (source.id ? source.id.name : (source.key ? source.key.name : "(anonymous)"));
-                let sourceId = `${sourceLabel}-${source.start}-${source.end}`;
-                // eslint-disable-next-line no-nested-ternary
-                let targetLabel = target.id ? target.id.name : (target.key ? target.key.name : "(anonymous)");
-                let targetId = `${targetLabel}-${target.start}-${target.end}`;
+                let { sourceId, sourceLabel } = getCallSourceNames(source);
+                let { targetId, targetLabel } = getCallTargetNames(target);
                 let edgeId = `${relative(srcPath, file)} | ${sourceId} -> ${targetId}`;
 
                 if (config.debug && !sourceLabel) {
@@ -439,8 +502,10 @@ function stripUnicodeBOM(text) {
                 };
             };
 
+            /* eslint-disable max-depth */
             for (let node of ast) {
                 let parent = node.parentNode;
+                // TODO: Support amdefine?
                 if (node.type === "ImportDeclaration") {
                     let libName = node.source.value;
                     if (!libName) {
@@ -536,9 +601,6 @@ function stripUnicodeBOM(text) {
 
         let addParentGroup = (dir) => {
             let parentFolder = basename(dir);
-            if (treeData.find((node) => node.data.id === parentFolder)) {
-                return;
-            }
             let parentParentFolder = dirname(dir);
             let isParentRoot = relative(srcPath, dirname(dir)) === "";
             // group
@@ -589,18 +651,22 @@ function stripUnicodeBOM(text) {
             } else {
                 let internalPath = resolve(dirname(file), libName);
                 let ext = extname(internalPath);
-                let altInternalPath = ext ? internalPath.replace(ext, "") : `${internalPath}.js`; // sometimes the extension is missing, TODO: support folder/index.js
+                let altInternalPath = ext ? internalPath.replace(ext, "") : `${internalPath}.js`; // extension may be included or omitted (assumption: .js)
+                let indexInternalPath = ext ? null : resolve(internalPath, "index.js"); // require(x) <=> require(x/index.js)
 
                 // If this internal dependency is among src files, it is a file node.
-                let srcFile = srcFiles.find((f) => f === internalPath || f === altInternalPath);
+                let srcFile = srcFiles.find((f) => f === internalPath || f === altInternalPath || f === indexInternalPath);
                 isInternalDep = Boolean(srcFile);
                 if (isInternalDep) {
                     let fileId = relative(srcPath, srcFile);
                     id = fileId;
                 }
                 if (id.includes(srcPath)) {
-                    // fix path notation
+                    // correct path notation
                     id = relative(srcPath, id);
+                    if (id === "") {
+                        id = ".";
+                    }
                 }
             }
             if (!colors[id]) {
@@ -612,7 +678,7 @@ function stripUnicodeBOM(text) {
                 treeData.push({
                     "data": {
                         id,
-                        "isData":  libName.toLocaleLowerCase().endsWith(".json"), // weak detection?
+                        "isData":  libName.toLowerCase().endsWith(".json"), // sufficient detection?
                         "library": { "name": libName, version },
                         "color":   colors[id],
                         "parent":  externalLibs.includes(libName) ? "external" : "internal", // group: external or internal
@@ -678,7 +744,7 @@ function stripUnicodeBOM(text) {
                 treeData.push({
                     "data": {
                         "id":     `${fileId} -> ${id}`,
-                        "color":  "#fff",
+                        "color":  colors[id] || "#fff",
                         "source": fileId,
                         "target": id,
                     },
@@ -741,9 +807,13 @@ function stripUnicodeBOM(text) {
         console.log("DEPENDENCIES OF LIBRARIES (NODE_MODULES)\n", node_modules);
     }
 
-    renderOutput(srcPath, {
+    let output = await renderOutput(srcPath, {
         name,
         version,
         "data": treeData,
     });
-})();
+
+    console.log(`LUNA report generated in ${output}`);
+}
+
+main();
