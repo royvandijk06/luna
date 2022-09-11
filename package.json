@@ -1,11 +1,11 @@
 {
   "name": "luna",
-  "version": "1.8.1",
+  "version": "1.9.0",
   "description": "LUNA: Library Usage in Node.js Analyzer",
-  "bin": "index.js",
-  "main": "index.js",
+  "bin": "src/index.js",
+  "main": "src/index.js",
   "scripts": {
-    "start": "node index.js",
+    "start": "node ./src/index.js",
     "test": "powershell \"node test.js 2>&1 | tee test.log\""
   },
   "keywords": [
@@ -40,7 +40,7 @@
   "author": "R.E.L. van Dijk",
   "license": "ISC",
   "dependencies": {
-    "flast": "^1.2.1",
+    "flast": "^1.2.3",
     "ejs": "^3.1.8",
     "glob": "^8.0.1",
     "node-fetch": "^2.6.7",

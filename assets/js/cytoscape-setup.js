@@ -84,6 +84,9 @@ class LUNA {
             if (library.version) {
                 html += `<tr><td><b>Version:</b></td><td>${library.version}</td></tr>`;
             }
+            if (library.tags && library.tags.length > 0) {
+                html += "<tr><td><b>Tags:</b></td><td id=\"tags-value\"></td></tr>";
+            }
             if (parent === "external" || parent === "deps") {
                 let isValidVersion = /^[a-z0-9.]+$/i.test(library.version); // good version validation?
                 html += `<tr><td><b>NPM:</b></td><td><a href="https://www.npmjs.com/package/${library.name}${isValidVersion ? `/v/${library.version}` : ""}" target="_blank">${library.name} <i class="fa-solid fa-arrow-up-right-from-square"></i></a></td></tr>`;
@@ -99,10 +102,36 @@ class LUNA {
             html += `<tr><td><b>Position:</b></td><td>${caller.start}</td></tr>`;
         }
         if (filePath) {
-            html += `<tr><td><b>Path:</b></td><td><a href="javascript:void()" data-file-path="${filePath}" onclick="window.open(this.dataset.filePath,this.dataset.filePath,'directories=0,titlebar=0,toolbar=0,location=0,status=0,menubar=0,scrollbars=no')" target="_blank">${filePath} <i class="fa-solid fa-arrow-up-right-from-square"></i></a></td></tr>`;
+            html += `<tr><td><b>Path:</b></td><td><a href="#" data-file-path="${filePath}" onclick="window.open(this.dataset.filePath,this.dataset.filePath,'directories=0,titlebar=0,toolbar=0,location=0,status=0,menubar=0,scrollbars=no')" target="_blank">${filePath} <i class="fa-solid fa-arrow-up-right-from-square"></i></a></td></tr>`;
         }
         html += "</table><br>";
         this.DOM.infoPanel.content.innerHTML = html;
+        let tagsValue = document.querySelector("#tags-value");
+        if (tagsValue) {
+            for (let tag of library.tags) {
+                let tagElement = document.createElement("a");
+                tagElement.href = "#";
+                tagElement.addEventListener("click", () => {
+                    this.highlightByTag(tag);
+                });
+                tagElement.innerText = tag;
+                tagsValue.appendChild(tagElement);
+                // only when it is not the last tag
+                if (library.tags.indexOf(tag) !== library.tags.length - 1) {
+                    tagsValue.appendChild(document.createTextNode(", "));
+                }
+            }
+        }
+    }
+
+    highlightByTag(tag) {
+        let nodes = this.cy.nodes().filter((n) => n.data("library.tags") && n.data("library.tags").map((t) => t.toLowerCase())
+            .includes(tag.toLowerCase()));
+        if (nodes.length > 0) {
+            this.selectedNodes.clear();
+            nodes.forEach((n) => this.selectedNodes.add(n.id()));
+            this.highlightNodes();
+        }
     }
 
     highlightNodes() {
@@ -122,52 +151,47 @@ class LUNA {
         }
     }
 
+    getOnDemandElements() {
+        let onDemandElems = [];
+        let edges = [];
+        let nodeParents = {};
+        // check all nodes of the graph
+        for (let element of this.data) {
+            // skip edges
+            if (element.data.source && element.data.target) {
+                edges.push(element);
+                continue;
+            }
+            // if node is not visible in the initial graph, add it to the on-demand elements
+            if (element.data.parent === "deps" || element.data.type === "API" || element.data.caller) {
+                onDemandElems.push(element);
+                nodeParents[element.data.id] = element.data.parent;
+            }
+        }
+        // check all edges of the graph (after nodes are checked)
+        for (let edge of edges) {
+            // if edge is between 2 hidden nodes (of the same parent), hide it
+            if (nodeParents[edge.data.source] && nodeParents[edge.data.target] && nodeParents[edge.data.source] === nodeParents[edge.data.target]) {
+                onDemandElems.push(edge);
+            } else {
+                // unhide attached nodes
+                onDemandElems = onDemandElems.filter((e) => e.data.id !== edge.data.source && e.data.id !== edge.data.target);
+            }
+        }
+        return onDemandElems;
+    }
+
     makeCy(style, layouts) {
         let layout = layouts.layered;
         this.DOM.settingsPanel.layout.value = "layered";
         layout.fit = true;
 
-        let elements = [];
-        let hiddenElements = [];
-        let hiddenNodeIds = {};
-        for (let element of this.data) {
-            if (element.source && element.target) {
-                continue;
-            }
-            if (element.data.parent === "deps" || element.data.type === "API" || element.data.caller) {
-                hiddenElements.push(element);
-                hiddenNodeIds[element.data.id] = element.data.parent;
-            } else {
-                elements.push(element);
-            }
-        }
-        let tmpElements = elements;
-        elements = [];
-        for (let element of tmpElements) {
-            if (hiddenNodeIds[element.data.source] || hiddenNodeIds[element.data.target]) {
-                // if edge is between hidden nodes, hide it
-                if (hiddenNodeIds[element.data.source] && hiddenNodeIds[element.data.target] && hiddenNodeIds[element.data.source] === hiddenNodeIds[element.data.target]) {
-                    hiddenElements.push(element);
-                } else {
-                    elements.push(element);
-                    // unhide attached nodes
-                    hiddenElements = hiddenElements.filter((e) => {
-                        if (e.data.id !== element.data.source && e.data.id !== element.data.target) {
-                            return true;
-                        }
-                        elements.push(e);
-                        return false;
-                    });
-                    // hiddenNodeIds = hiddenNodeIds.filter((id) => id !== element.data.source && id !== element.data.target);
-                }
-            } else {
-                elements.push(element);
-            }
-        }
+        let hiddenElements = this.getOnDemandElements();
+        let hiddenElementIds = hiddenElements.map((e) => e.data.id);
+        let elements = this.data.filter((e) => !hiddenElementIds.includes(e.data.id));
 
         this.cy = cytoscape({
             "container":           document.getElementById("cy"),
-            // "elements":            this.data,
             elements,
             style,
             layout,
@@ -183,7 +207,7 @@ class LUNA {
             this.cyDataNodes = this.cy.$("node[?isData]");
             this.cyDataEdges = this.cyDataNodes.connectedEdges();
 
-            this.cy.expandCollapse({
+            let api = this.cy.expandCollapse({
                 "layoutBy": layout,
                 "ready":    () => setTimeout(() => {
                     // prevent view from changing when expanding/collapsing
@@ -195,21 +219,13 @@ class LUNA {
                 }, 3000), // apparently ready does not truly mean ready
                 "fisheye":                        false,
                 "animate":                        false,
-                "animationDuration":              1500,
                 "undoable":                       false,
                 "cueEnabled":                     false,
-                "expandCollapseCuePosition":      "top-left",
-                "expandCollapseCueSize":          12,
-                "expandCollapseCueLineSize":      8,
-                "expandCueImage":                 undefined,
-                "collapseCueImage":               undefined,
-                "expandCollapseCueSensitivity":   1,
-                "edgeTypeInfo":                   "edgeType",
+                // "edgeTypeInfo":                   "edgeType",
                 "groupEdgesOfSameTypeOnCollapse": false,
                 "allowNestedEdgeCollapse":        true,
                 "zIndex":                         999, // z-index value of the canvas in which cue ımages are drawn
             });
-            let api = this.cy.expandCollapse("get");
             this.cy.nodes().on("expandcollapse.aftercollapse", (evt) => {
                 evt.target.data("collapsed", true);
                 // api.collapseAllEdges();
@@ -225,7 +241,6 @@ class LUNA {
                 evt.target.data("collapsed", false);
                 this.selectedNodes.delete(evt.target.id());
                 this.highlightNodes();
-                // this.DOM.infoPanel.centerBtn.click();
                 let children = evt.target.children();
                 for (let node of evt.target.children().connectedEdges()
                     .connectedNodes()
@@ -637,6 +652,7 @@ class LUNA {
                     "border-width":                 0,
                     // "width":                        50,
                     // "height":                       50,
+                    "shape":                        "round-rectangle",
                 },
             },
             {
@@ -976,10 +992,11 @@ class LUNA {
             libs[cat].forEach((e) => { libKeys[e.data.id] = e; });
             for (let libKey of Object.keys(libKeys).sort()) {
                 let lib = libKeys[libKey];
+                let name = lib.data.label.startsWith("#") && lib.data.label.endsWith("#") ? `<span title="This is a variable used in the source code.">${lib.data.label}</span>` : lib.data.label;
                 html += `<li id="${lib.data.id}">
                     <button title="Show/hide from the graph." class="toggle off"><i class="fa-solid fa-eye"></i></button>
                     <button title="Highlight in the graph." class="highlight off"><i class="fa-regular fa-lightbulb"></i></button>
-                    <i class="fa fa-book"></i> ${lib.data.label}
+                    <i class="fa fa-book"></i> ${name}
                 </li>`;
             }
             html += "</ul></div>";
