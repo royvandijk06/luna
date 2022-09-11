@@ -1,5 +1,5 @@
 {
-  "name": "luna",
+  "name": "luna-scanner",
   "version": "1.9.0",
   "description": "LUNA: Library Usage in Node.js Analyzer",
   "bin": "src/index.js",
@@ -39,6 +39,10 @@
   ],
   "author": "R.E.L. van Dijk",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/royvandijk06/luna-scanner.git"
+  },
   "dependencies": {
     "flast": "^1.2.3",
     "ejs": "^3.1.8",
