@@ -229,11 +229,6 @@ async function scan(srcPath, dependencies, devDependencies, main) {
                     // let lunaDataIds = lunaData.map((e) => e.data.id);
                     // let sourceId = api[name].sourceIds.find((id) => lunaDataIds.includes(id));
                     let sourceId = api[name].sourceIds.find((id) => calls[file] && calls[file][id]);
-                    if (name === "(reference)\nas \"glob\"") {
-                        console.log("sourceId", sourceId);
-                        console.log("calls[file]", calls[file]);
-                        console.log("api[name].sourceIds", api[name].sourceIds);
-                    }
                     lunaData.push({
                         "data": {
                             "id":        `${sourceId || fileId} -> ${name}`,
