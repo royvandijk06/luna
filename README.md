@@ -1,18 +1,31 @@
-# LUNA: Library Usage in Node.js Analyzer
+
+[![NPM version](https://img.shields.io/npm/v/luna-scanner)](https://www.npmjs.com/package/luna-scanner)
+[![NPM downloads](https://img.shields.io/npm/dw/luna-scanner)](https://www.npmjs.com/package/luna-scanner)
+[![GitHub issues](https://img.shields.io/github/issues/royvandijk06/luna)](https://github.com/royvandijk06/luna/issues)
+[![GitHub stars](https://img.shields.io/github/stars/royvandijk06/luna)](https://github.com/royvandijk06/luna/stargazers)
+
+
+# ☾ LUNA - Library Usage in Node.js Analyzer
 
 <center><img src="luna.png" alt="luna"></center>
 
 ## Description
-LUNA is a software development tool for node.js projects, with a focus on libraries. The goal of LUNA is to aid developers in better understanding how libraries are being utilized in their projects.
+LUNA is a software development tool for node.js (and other javascript) projects, with a focus on libraries. The goal of LUNA is to aid developers in better understanding how libraries are being utilized in their projects.
+
+## Requirements
+ * [Node.js](https://nodejs.org/en/)
+ * Your node.js project
 
 ## Usage
 Inside any node.js project, run:
 ```bash
 npx luna-scanner
 ```
-After analyzing the source code, it will generate a luna report, which includes a visualization about the interaction between source code and libraries.
+After analyzing the source code, it will generate a LUNA report, which includes a [visualization](https://raw.githubusercontent.com/royvandijk06/luna/main/luna.png) about the interaction between source code and libraries.
 
-## Report Manual
+<details>
+ <summary>LUNA Report Manual</summary>
+ 
  * Drag (click and hold) the mouse to pan around or move nodes around
  * Use the mouse wheel to zoom in or out
  * Hovering over a node will display information on the bottom left and highlight connected nodes
@@ -24,3 +37,11 @@ After analyzing the source code, it will generate a luna report, which includes 
     3. Hide a selection of nodes (representing libraries or files)
     4. Highlight a selection of nodes (representing libraries or files)
  * Hover your mouse above menu items to find more information about their functionality
+</details>
+
+## Known Issues
+ * The [library](https://github.com/iVis-at-Bilkent/cytoscape.js-expand-collapse) used to handle collapsing and expanding of nodes may break in some situations. Best to avoid excessive collapsing/expanding.
+ 
+## Feedback
+Much appreciated!
+I encourage you to use [my feedback form](https://forms.gle/EcxLY7EsepptZ7Mn8).
