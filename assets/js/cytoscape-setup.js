@@ -31,6 +31,7 @@ class LUNA {
                 "content":      document.querySelector("#info-content"),
                 "centerBtn":    document.querySelector("#centerBtn"), // center node
                 "highlightBtn": document.querySelector("#highlightBtn"), // highlight node
+                "lunaBtn":      document.querySelector("#lunaBtn"), // luna report node
                 "lockBtn":      document.querySelector("#lockBtn"), // highlight node
             },
         };
@@ -702,10 +703,18 @@ class LUNA {
                 },
             },
             {
+                "selector": "node[type = 'Class']",
+                "style":    {
+                    "background-image":             "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI1MTIiIGhlaWdodD0iNTEyIj48IS0tISBGb250IEF3ZXNvbWUgUHJvIDYuMi4wIGJ5IEBmb250YXdlc29tZSAtIGh0dHBzOi8vZm9udGF3ZXNvbWUuY29tIExpY2Vuc2UgLSBodHRwczovL2ZvbnRhd2Vzb21lLmNvbS9saWNlbnNlIChDb21tZXJjaWFsIExpY2Vuc2UpIENvcHlyaWdodCAyMDIyIEZvbnRpY29ucywgSW5jLi0tPjxwYXRoIGZpbGw9IiNmZmYiIGQ9Ik0yMzQuNSA1LjdjMTMuOS01IDI5LjEtNSA0My4xIDBsMTkyIDY4LjZjMjUuNCA5LjEgNDIuNCAzMy4yIDQyLjQgNjAuM3YyNDIuOGMwIDI3LTE3IDUxLjItNDIuNSA2MC4zbC0xOTIgNjguNmMtMTMuOSA1LTI5LjEgNS00My4xIDBsLTE5Mi02OC42QzE3IDQyOC42IDAgNDA0LjUgMCAzNzcuNFYxMzQuNmMwLTI3IDE3LTUxLjIgNDIuNS02MC4zbDE5Mi02OC42ek0yNTYgNjZMODIuMyAxMjggMjU2IDE5MGwxNzMuNy02MkwyNTYgNjZ6bTMyIDM2OC42bDE2MC01Ny4xdi0xODhsLTE2MCA1Ny4xdjE4OHoiLz48L3N2Zz4=",
+                    "background-fit":               "contain",
+                    "background-image-containment": "over",
+                    "background-clip":              "none",
+                    "background-opacity":           "0",
+                },
+            },
+            {
                 "selector": "node[?isMain]",
                 "style":    {
-                    // "width":            50,
-                    // "height":           50,
                     "background-color": "black",
                     "border-color":     "#fff",
                     "border-width":     3,
@@ -821,6 +830,19 @@ class LUNA {
                 }
             }
             this.highlightNodes();
+        });
+
+        this.DOM.infoPanel.lunaBtn.addEventListener("click", () => {
+            let { nodeId } = this.DOM.infoPanel.container.dataset;
+            let node = this.cy.$id(nodeId);
+            if (node && node.data("library") && node.data("parent") !== "internal") {
+                let { name, version } = node.data("library");
+                let lib = name + (version ? `@${version}` : "");
+                let cmd = `npm pack ${lib} && tar -xzf ${lib.replace("@", "-")}.tgz && cd package && npm install --ignore-scripts & npx luna-scanner`;
+                window.prompt(`To generate a LUNA report of ${lib}, execute the following command in a terminal:`, cmd);
+            } else {
+                window.alert("This node is not a library that can be scanned by LUNA");
+            }
         });
 
         this.DOM.infoPanel.lockBtn.addEventListener("click", () => {
