@@ -30,12 +30,14 @@ const defaults = {
         "dependencyTree": true,
         "libraryAPI":     true,
     },
+    "ignore": [],
 };
 
 const { name, version, devDependencies, dependencies, main, luna } = pkg;
 const config = luna || {};
 global.debug = process.argv[3] === "1" || process.argv[3] === "true" ? true : config.debug || defaults.debug;
 global.components = { ...defaults.components, ...config.components };
+global.ignore = config.ignore || defaults.ignore;
 
 console.log(`LUNA is scanning ${srcPath}...`);
 scan(srcPath, dependencies, devDependencies, main)
@@ -49,8 +51,6 @@ scan(srcPath, dependencies, devDependencies, main)
                     cmd = "open";
                     break;
                 case "win32":
-                    cmd = "start";
-                    break;
                 case "win64":
                     cmd = "start";
                     break;

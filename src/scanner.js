@@ -30,8 +30,11 @@ function stripUnicodeBOM(text) {
 async function scan(srcPath, dependencies, devDependencies, main) {
     let getFiles = promisify(glob);
     // all javascript files in the project (excluding node_modules)
-    let pattern = resolve(`${srcPath}/{,!(node_modules)/**/}*.{js,mjs}`).replace(/\\/g, "/");
-    let srcFiles = (await getFiles(pattern)).map((f) => resolve(f));
+    let srcFiles = (await getFiles("/{,!(node_modules)/**/}*.{js,mjs}", {
+        "cwd":    resolve(srcPath),
+        "root":   resolve(srcPath),
+        "ignore": global.ignore,
+    })).map((f) => resolve(f));
     let hasNodeModules = await stat(resolve(srcPath, "./node_modules")).then(() => true)
         .catch(() => false);
     let node_modules = await getNodeModules(srcPath, hasNodeModules, dependencies, devDependencies);
@@ -42,9 +45,6 @@ async function scan(srcPath, dependencies, devDependencies, main) {
     let calls = {};
 
     for (const file of srcFiles) {
-        // if (file.includes("assets")) { // TODO: REMOVE THIS!
-        //     continue;
-        // }
         try {
             const code = await readFile(file);
             // https://github.com/eslint/eslint/blob/b93af98b3c417225a027cabc964c38e779adb945/lib/linter/linter.js#L779

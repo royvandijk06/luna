@@ -39,6 +39,28 @@ After analyzing the source code, it will generate a LUNA report, which includes 
  * Hover your mouse above menu items to find more information about their functionality
 </details>
 
+## Configuration
+Via `package.json` (defaults):
+```
+{
+   ...
+   "luna": {
+      "debug": false,            // toggle debug mode
+      "components": {            // toggle components of LUNA
+         "callGraph": true,      // detection of function calls within files
+         "dependencyTree": true, // detection of dependency chains
+         "libraryAPI": true,     // detection of used API of libraries
+      },
+      "ignore": [],              // array of glob patterns for LUNA's scanner to ignore
+   },
+   ...
+}
+```
+Via command line arguments (limited):
+```bash
+npx luna-scanner [path_to_project] [debug]
+```
+
 ## Known Issues
  * The [library](https://github.com/iVis-at-Bilkent/cytoscape.js-expand-collapse) used to handle collapsing and expanding of nodes may break in some situations. Best to avoid excessive collapsing/expanding.
  
