@@ -103,7 +103,7 @@ class LUNA {
             html += `<tr><td><b>Position:</b></td><td>${caller.start}</td></tr>`;
         }
         if (filePath) {
-            html += `<tr><td><b>Path:</b></td><td><a href="#" data-file-path="${filePath}" onclick="window.open(this.dataset.filePath,this.dataset.filePath,'directories=0,titlebar=0,toolbar=0,location=0,status=0,menubar=0,scrollbars=no')" target="_blank">${filePath} <i class="fa-solid fa-arrow-up-right-from-square"></i></a></td></tr>`;
+            html += `<tr><td><b>Path:</b></td><td><a data-file-path="${filePath}" onclick="window.open(this.dataset.filePath,this.dataset.filePath,'directories=0,titlebar=0,toolbar=0,location=0,status=0,menubar=0,scrollbars=no')" target="_blank">${filePath} <i class="fa-solid fa-arrow-up-right-from-square"></i></a></td></tr>`;
         }
         html += "</table><br>";
         this.DOM.infoPanel.content.innerHTML = html;
@@ -111,7 +111,6 @@ class LUNA {
         if (tagsValue) {
             for (let tag of library.tags) {
                 let tagElement = document.createElement("a");
-                tagElement.href = "#";
                 tagElement.addEventListener("click", () => {
                     this.highlightByTag(tag);
                 });
@@ -872,7 +871,16 @@ class LUNA {
 
             for (let id of ids) {
                 if (btn.classList.contains("toggle")) {
-                    if (btn.classList.contains("on")) { // hidden
+                    // hidden => visible
+                    if (btn.classList.contains("on")) {
+                        let parent = [...btn.parentNode.parentNode.parentNode.children].find((e) => e.classList.contains("folder-root"));
+                        if (parent) {
+                            let parentBtn = parent.previousSibling;
+                            // unhide parent too
+                            if (parentBtn.classList.contains("on")) {
+                                parentBtn.click();
+                            }
+                        }
                         btn.classList.remove("on");
                         btn.classList.add("off");
                         let nodes = this.trashBin[id];
@@ -881,7 +889,8 @@ class LUNA {
                         let i = btn.querySelector("i");
                         i.classList.remove("fa-eye-slash");
                         i.classList.add("fa-eye");
-                    } else { // visible
+                    // visible => hidden
+                    } else {
                         btn.classList.remove("off");
                         btn.classList.add("on");
                         let nodes = this.cy.$id(id).remove();

@@ -32,6 +32,12 @@
 a {
     color: #999999;
     text-decoration: none;
+    cursor: pointer;
+}
+
+a:hover,
+a.hover {
+    text-decoration: underline;
 }
 
 #cy {
