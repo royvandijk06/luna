@@ -21,7 +21,7 @@ Inside any node.js project, run:
 ```bash
 npx luna-scanner
 ```
-After analyzing the source code, it will generate a LUNA report, which includes a [visualization](https://raw.githubusercontent.com/royvandijk06/luna/main/luna.png) about the interaction between source code and libraries.
+After analyzing the source code, it will generate a LUNA report, which includes a [visualization](https://raw.githubusercontent.com/royvandijk06/luna/main/luna.png) about the interaction between source code and libraries. ([Live Demo](https://royvandijk06.github.io/luna/))
 
 <details>
  <summary>LUNA Report Manual</summary>
