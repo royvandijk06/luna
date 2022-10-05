@@ -29,6 +29,11 @@
     right: 25px;
 }
 
+#layoutRefreshBtn {
+    padding: 0.3em;
+    border: none;
+}
+
 a {
     color: #999999;
     text-decoration: none;

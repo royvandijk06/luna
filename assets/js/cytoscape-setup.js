@@ -15,16 +15,17 @@ class LUNA {
         this.trashBin = {};
         this.DOM = {
             "settingsPanel": {
-                "container": document.querySelector("#settings"),
-                "bShowData": document.querySelector("#bShowData"), // show data (.json files)
-                "spacing":   document.querySelector("#spacing"), // change spacing
-                "layout":    document.querySelector("#layout"), // change layout
-                "fileTree":  document.querySelector("#fileTree"), // manipulate file nodes
-                "libTree":   document.querySelector("#libTree"), // manipulate library nodes
-                "fitBtn":    document.querySelector("#fitBtn"), // reset cytoscape
-                "resetBtn":  document.querySelector("#resetBtn"), // fit cytoscape
-                "imgBtn":    document.querySelector("#imgBtn"), // save img cytoscape
-                "findBtn":   document.querySelector("#findBtn"), // find a node
+                "container":        document.querySelector("#settings"),
+                "bShowData":        document.querySelector("#bShowData"), // show data (.json files)
+                "spacing":          document.querySelector("#spacing"), // change spacing
+                "layout":           document.querySelector("#layout"), // change layout
+                "layoutRefreshBtn": document.querySelector("#layoutRefreshBtn"), // refresh layout
+                "fileTree":         document.querySelector("#fileTree"), // manipulate file nodes
+                "libTree":          document.querySelector("#libTree"), // manipulate library nodes
+                "fitBtn":           document.querySelector("#fitBtn"), // reset cytoscape
+                "resetBtn":         document.querySelector("#resetBtn"), // fit cytoscape
+                "imgBtn":           document.querySelector("#imgBtn"), // save img cytoscape
+                "findBtn":          document.querySelector("#findBtn"), // find a node
             },
             "infoPanel": {
                 "container":    document.querySelector("#info"),
@@ -756,6 +757,7 @@ class LUNA {
         };
         this.DOM.settingsPanel.spacing.addEventListener("input", changeLayout);
         this.DOM.settingsPanel.layout.addEventListener("input", changeLayout);
+        this.DOM.settingsPanel.layoutRefreshBtn.addEventListener("click", changeLayout);
 
         this.DOM.settingsPanel.fitBtn.addEventListener("click", () => {
             if (!this.cy || !this.cy.ready) {
