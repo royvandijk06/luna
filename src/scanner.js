@@ -1,9 +1,12 @@
-const { basename, dirname, extname, relative, resolve } = require("path");
+// Internal dependencies
 const { constructString, constructTemplateLiteral, findReferences } = require("./common");
 const { extractCalls } = require("./call-graph");
 const { extractLibs } = require("./library-api");
-const { generateFlatAST } = require("flast");
 const { getNodeModules } = require("./dependency-graph");
+
+// External dependencies / libraries
+const { basename, dirname, extname, relative, resolve } = require("path");
+const { generateFlatAST } = require("flast");
 const { promisify } = require("util");
 const { readFile, stat } = require("fs/promises");
 const glob = require("glob");
