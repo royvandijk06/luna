@@ -2,10 +2,17 @@ const { dirname, resolve } = require("path");
 const { findCallSource, getCallSourceNames } = require("./call-graph");
 const { findReferences, constructString } = require("./common");
 
-/* Possibilities:
+/**
+ * Discover all the library API, i.e. the functions that are exported by the library and imported by the source file.
+ *
+ * Possibilities:
  * 1. Library is loaded into a single variable => variable = library name
  * 2. Library is loaded destructively into multiple objects => require(...) = library name
  * 3. After library is loaded, it gets instantiated
+ *
+ * @param {Node} parent - The node to start from.
+ * @param {Object} [_api] - the current API object.
+ * @returns {Object} The return value is the API of the library.
  */
 function discoverAPI(parent, _api = {}) {
     let api = _api;
@@ -57,6 +64,14 @@ function discoverAPI(parent, _api = {}) {
     return api;
 }
 
+/**
+ * It extracts the names of libraries that are imported or required in a JavaScript file
+ * @param {Node[]} ast - The flattened AST of the file.
+ * @param {string} file - The file being parsed.
+ * @param {string} srcPath - The path to the project's root directory.
+ * @returns {Object} The return value is an object containing the names of the libraries and their API.
+ * @throws {Error} If the AST is not an array.
+ */
 function extractLibs(ast, file, srcPath) {
     if (!Array.isArray(ast)) {
         throw new Error("AST must be a flattened array");
@@ -107,7 +122,7 @@ function extractLibs(ast, file, srcPath) {
             saveLib(libName, parent);
         }
 
-        // TODO: exports from this file
+        // TODO: analyze the exports from this file
     }
     return libs;
 }

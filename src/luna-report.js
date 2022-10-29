@@ -3,6 +3,12 @@ const { writeFile } = require("fs/promises");
 const pkg = require("../package.json");
 const ejs = require("ejs");
 
+/**
+ * Renders the template with the data, and writes the result to the output path.
+ * @param {string} outputPath - The path to the output directory.
+ * @param {{name: string, version: string, data}} data - The data object that was passed to the render function.
+ * @returns {Promise<string>} The path to the generated HTML file.
+ */
 async function renderOutput(outputPath, data) {
     let paths = {
         "cy":            resolve(__dirname, "..", "assets", "js", "cytoscape.min.js"),
@@ -29,6 +35,14 @@ async function renderOutput(outputPath, data) {
     return writeFile(result, html).then(() => result);
 }
 
+/**
+ * A wrapper function for renderOutput().
+ * @param {string} srcPath - The path to the project's root directory.
+ * @param {string} name - The name of the project.
+ * @param {string} version - The version of the project.
+ * @param {Object} data - The data that will be used to generate the output.
+ * @returns {Promise<string>} The output of the renderOutput() function.
+ */
 async function generate(srcPath, name, version, data) {
     let output = await renderOutput(srcPath, {
         name,

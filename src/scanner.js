@@ -13,10 +13,10 @@ const glob = require("glob");
 const randomColor = require("randomcolor");
 
 /**
- * https://github.com/eslint/eslint/blob/b93af98b3c417225a027cabc964c38e779adb945/lib/linter/linter.js#L718
  * Strips Unicode BOM from a given text.
- * @param {string} text A text to strip.
+ * @param {string} text - A text to strip.
  * @returns {string} The stripped text.
+ * @see {@link https://github.com/eslint/eslint/blob/b93af98b3c417225a027cabc964c38e779adb945/lib/linter/linter.js#L718 ESLint's src}
  */
 function stripUnicodeBOM(text) {
     /*
@@ -30,6 +30,14 @@ function stripUnicodeBOM(text) {
     return text;
 }
 
+/**
+ * Scans a project for libraries and architecture information and returns a data object, parsable by cytoscape.js.
+ * @param {string} srcPath - The path to the project's root directory.
+ * @param {Object} dependencies - The dependencies of the project.
+ * @param {Object} devDependencies - The devDependencies of the project.
+ * @param {string} main - The main file of the project.
+ * @returns {Promise<Object>} The data object.
+ */
 async function scan(srcPath, dependencies, devDependencies, main) {
     let getFiles = promisify(glob);
     // all javascript files in the project (excluding node_modules)

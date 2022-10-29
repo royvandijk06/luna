@@ -4,9 +4,17 @@ const fetch = require("node-fetch");
 
 const depsCache = {};
 
+/**
+ * It fetches the dependencies of a given package and version, and returns them, along with the tags (if available).
+ * @param {string} name - The name of the package.
+ * @param {string} version - The version of the package to fetch.
+ * @returns {Promise<{dependencies: Object, tags: string[]}>} The dependencies (and tags) of the given package.
+ * @throws {Error} If the package is not found.
+ */
 async function getDependencies(name, version) {
-    if (depsCache[`${name}@${version}`]) {
-        return depsCache[`${name}@${version}`];
+    let pkg = `${name}@${version}`;
+    if (depsCache[pkg]) {
+        return depsCache[pkg];
     }
 
     let url = `https://registry.npmjs.org/${name}/${version}`;
@@ -29,13 +37,20 @@ async function getDependencies(name, version) {
     let { dependencies, keywords } = await response.json();
     // eslint-disable-next-line no-use-before-define
     let parsedDependencies = await parseDependencies(dependencies);
-    depsCache[`${name}@${version}`] = {
+    depsCache[pkg] = {
         "dependencies": parsedDependencies,
         "tags":         keywords || [],
     };
-    return depsCache[`${name}@${version}`];
+    return depsCache[pkg];
 }
 
+/**
+ * It takes in the dependencies and devDependencies from the package.json file, and returns an object
+ * with the dependencies and their versions, and the tags for each dependency
+ * @param {Object} dependencies - The dependencies object from the package.json file.
+ * @param {Object} [devDependencies] - The devDependencies object from the package.json file.
+ * @returns {Promise<Object>} An object with the dependencies.
+ */
 async function parseDependencies(dependencies, devDependencies = {}) {
     let node_modules = {};
     let deps = { ...dependencies, ...devDependencies };
@@ -56,6 +71,17 @@ async function parseDependencies(dependencies, devDependencies = {}) {
     return node_modules;
 }
 
+/**
+ * It gets the dependencies from the package.json file, or if the user has specified to use local
+ * dependencies, it gets the dependencies from the node_modules folder
+ * @param {string} srcPath - The path to the project's root directory
+ * @param {boolean} useLocalDependencies - If true, the function will use the local dependencies in the srcPath
+ * directory. If false, it will fetch the dependencies from the package.json file.
+ * @param {Object} dependencies - The dependencies object from the package.json file.
+ * @param {Object} devDependencies - The devDependencies object from the package.json file.
+ * @returns {Promise<Object>} A promise that resolves to an object containing the dependencies of the project.
+ * @throws {Error} If parsing local dependencies fails.
+ */
 async function getNodeModules(srcPath, useLocalDependencies, dependencies, devDependencies) {
     if (!global.components.dependencyTree || (!useLocalDependencies && !dependencies)) {
         // throw new Error("No dependencies found");

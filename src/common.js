@@ -1,3 +1,8 @@
+/**
+ * It returns all references to a node, except for the node itself
+ * @param {Node} node - The node to find references for.
+ * @returns {Node[]} An array of references to the node.
+ */
 function findReferences(node) {
     if (!node) {
         if (global.debug) { console.log(new Error("No node")); }
@@ -14,6 +19,13 @@ function findReferences(node) {
     });
 }
 
+/**
+ * It takes a TemplateLiteral node and the path to the project's root directory, and returns a string that is the concatenation
+ * of the strings in the template literal
+ * @param {TemplateLiteral} node - The node that we're currently constructing a string for.
+ * @param {string} srcPath - The path to the project's root directory, needed for constructString().
+ * @returns {string} A string that is the concatenation of the strings in the template literal.
+ */
 function constructTemplateLiteral(node, srcPath) {
     let str = "";
     let nodes = [...node.quasis, ...node.expressions].sort((a, b) => a.start - b.start);
@@ -25,6 +37,12 @@ function constructTemplateLiteral(node, srcPath) {
     return str;
 }
 
+/**
+ * It takes a node and a source path, and returns a string
+ * @param {Node} node - The AST node that we're currently processing.
+ * @param {string} srcPath - The path to the project's root directory.
+ * @returns The string value of the node.
+ */
 function constructString(node, srcPath) {
     let str = "";
 

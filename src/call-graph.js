@@ -1,6 +1,11 @@
 const { findReferences } = require("./common");
 const { relative } = require("path");
 
+/**
+ * It finds the source function that this CallExpression node is being called from.
+ * @param {CallExpression} node - The node that is being called.
+ * @returns {Node} The block of the function that the node is in.
+ */
 function findCallSource(node) {
     let betterScope = node.scope;
     while (betterScope.type && !betterScope.type.toLowerCase().includes("function") && !betterScope.type.toLowerCase().includes("module") && betterScope.upper) {
@@ -9,8 +14,11 @@ function findCallSource(node) {
     return betterScope.block;
 }
 
-// @param {Object} node - CallExpression node
-// @returns VariableDeclarator|FunctionExpression|FunctionDeclaration|MethodDefinition
+/**
+ * It finds the definition of the function that is being called, a.k.a. the destination/target.
+ * @param {CallExpression} node - The node that we're currently visiting.
+ * @returns {?(VariableDeclarator|FunctionExpression|FunctionDeclaration|MethodDefinition}} The function definition of the function being called.
+ */
 function findCallDefinition(node) {
     if (node.callee.type === "FunctionExpression") {
         if (node.callee.parentNode.type === "MethodDefinition") { // method
@@ -57,6 +65,11 @@ function findCallDefinition(node) {
     return null;
 }
 
+/**
+ * It returns a unique identifier and a human-readable label for a given call-source AST node.
+ * @param {Node} source - The source of the call.
+ * @returns {{sourceId: string, sourceLabel: string}} An object with two properties: sourceId and sourceLabel.
+ */
 function getCallSourceNames(source) {
     let sourceId = null;
     let sourceLabel = null;
@@ -95,6 +108,11 @@ function getCallSourceNames(source) {
     return { sourceId, sourceLabel };
 }
 
+/**
+ * It returns a unique identifier and a human-readable label for a given call-target AST node.
+ * @param {Node} target - The target of the call.
+ * @returns {{targetId: string, targetLabel: string}} An object with two properties: targetId and targetLabel.
+ */
 function getCallTargetNames(target) {
     let targetId = null;
     let targetLabel = null;
@@ -113,6 +131,14 @@ function getCallTargetNames(target) {
     return { targetId, targetLabel };
 }
 
+/**
+ * Extracts all the calls from a given AST.
+ * @param {Node[]} ast - The flattened AST array.
+ * @param {string} file - The file path of the file being parsed.
+ * @param {string} srcPath - The path to the project's root directory.
+ * @returns {Object} The object containing all the calls data extracted from the AST, formatted as Cytoscape.js elements.
+ * @throws {Error} If the AST is not an array.
+ */
 function extractCalls(ast, file, srcPath) {
     if (!Array.isArray(ast)) {
         throw new Error("AST must be a flattened array");
